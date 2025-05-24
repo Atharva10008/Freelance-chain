@@ -25,10 +25,9 @@ const blockchainToDbStatus = {
 exports.createContract = async (req, res) => {
     try {
         console.log('Received contract creation request:', req.body);
+        
         // Validate required fields
-        const requiredFields = [
-            'jobId', 'bidId', 'freelancerId', 'freelancerAddress', 'bidAmount', 'jobTitle', 'jobDescription', 'deadline', 'contractId', 'contractAddress', 'transactionHash'
-        ];
+        const requiredFields = ['jobId', 'bidId', 'freelancerId', 'freelancerAddress', 'bidAmount', 'jobTitle', 'jobDescription', 'deadline'];
         for (const field of requiredFields) {
             if (!req.body[field]) {
                 return res.status(400).json({
@@ -37,27 +36,65 @@ exports.createContract = async (req, res) => {
                 });
             }
         }
-        // Save contract in database
-        const contract = new Contract({
-            job: req.body.jobId,
-            bid: req.body.bidId,
-            client: req.user._id,
-            freelancer: req.body.freelancerId,
-            contractAddress: req.body.contractAddress,
-            contractId: Number(req.body.contractId),
+
+        const contractData = {
+            freelancerAddress: req.body.freelancerAddress,
             bidAmount: req.body.bidAmount,
-            jobTitle: req.body.jobTitle,
-            jobDescription: req.body.jobDescription,
             deadline: req.body.deadline,
-            transactionHash: req.body.transactionHash,
-            status: 'created'
-        });
-        await contract.save();
-        console.log('Contract successfully saved to database with ID:', contract._id);
-        res.status(201).json({
-            success: true,
-            data: { ...contract.toObject(), contractId: Number(contract.contractId) }
-        });
+            jobTitle: req.body.jobTitle,
+            jobDescription: req.body.jobDescription
+        };
+
+        // Create contract on blockchain
+        console.log('Attempting to create contract with data:', contractData);
+        const result = await contractUtils.createContract(contractData);
+        
+        if (!result || !result.contractId) {
+            throw new Error('Failed to get contract ID from blockchain');
+        }
+
+        // Create contract in database
+        try {
+            console.log('Preparing contract data for database save:', {
+                job: req.body.jobId,
+                bid: req.body.bidId,
+                client: req.user._id,
+                freelancer: req.body.freelancerId,
+                contractAddress: result.address,
+                contractId: result.contractId.toNumber(), // Convert BigNumber to number
+                bidAmount: req.body.bidAmount,
+                jobTitle: req.body.jobTitle,
+                jobDescription: req.body.jobDescription,
+                deadline: req.body.deadline,
+                transactionHash: result.transactionHash
+            });
+
+            const contract = new Contract({
+                job: req.body.jobId,
+                bid: req.body.bidId,
+                client: req.user._id,
+                freelancer: req.body.freelancerId,
+                contractAddress: result.address,
+                contractId: result.contractId.toNumber(), // Convert BigNumber to number
+                bidAmount: req.body.bidAmount,
+                jobTitle: req.body.jobTitle,
+                jobDescription: req.body.jobDescription,
+                deadline: req.body.deadline,
+                transactionHash: result.transactionHash,
+                status: 'created'
+            });
+
+            await contract.save();
+            console.log('Contract successfully saved to database with ID:', contract._id);
+
+            res.status(201).json({
+                success: true,
+                data: contract
+            });
+        } catch (dbError) {
+            console.error('Error saving contract to database:', dbError);
+            throw dbError;
+        }
     } catch (err) {
         console.error('Error in createContract function:', err);
         res.status(500).json({
@@ -159,18 +196,6 @@ exports.getContract = async (req, res) => {
                 contract.contractAddress,
                 contract.contractId
             );
-            if (!blockchainState) {
-                // Return database data if blockchain fetch fails or contract does not exist on-chain
-                return res.status(200).json({
-                    success: true,
-                    data: {
-                        ...contract.toObject(),
-                        contractId: Number(contract.contractId),
-                        blockchainState: null
-                    },
-                    warning: 'Blockchain state not available or contract does not exist on-chain'
-                });
-            }
             // Map blockchain status to DB status
             const dbStatus = blockchainToDbStatus[blockchainState.status];
             if (dbStatus && dbStatus !== contract.status) {
@@ -180,7 +205,6 @@ exports.getContract = async (req, res) => {
             // Combine database and blockchain data
             const contractData = {
                 ...contract.toObject(),
-                contractId: Number(contract.contractId),
                 blockchainState
             };
 
@@ -193,11 +217,7 @@ exports.getContract = async (req, res) => {
             // Return database data if blockchain fetch fails
             res.status(200).json({
                 success: true,
-                data: {
-                    ...contract.toObject(),
-                    contractId: Number(contract.contractId),
-                    blockchainState: null
-                },
+                data: contract,
                 warning: 'Blockchain state not available'
             });
         }
@@ -258,7 +278,7 @@ exports.depositFunds = async (req, res) => {
             });
         }
 
-        await contractUtils.depositFunds(contract.contractAddress, contract.contractId, amount);
+        await contractUtils.depositFunds(contract.contractId, amount);
         
         contract.status = 'funded';
         await contract.save();
@@ -290,7 +310,7 @@ exports.submitWork = async (req, res) => {
             });
         }
 
-        await contractUtils.submitWork(contract.contractAddress, contract.contractId, workHash);
+        await contractUtils.submitWork(contract.contractId, workHash);
         
         contract.status = 'work_submitted';
         await contract.save();
@@ -321,7 +341,7 @@ exports.approveWork = async (req, res) => {
             });
         }
 
-        await contractUtils.approveWork(contract.contractAddress, contract.contractId);
+        await contractUtils.approveWork(contract.contractId);
         
         contract.status = 'work_approved';
         await contract.save();
@@ -352,7 +372,7 @@ exports.releasePayment = async (req, res) => {
             });
         }
 
-        await contractUtils.releasePayment(contract.contractAddress, contract.contractId);
+        await contractUtils.releasePayment(contract.contractId);
         
         contract.status = 'completed';
         await contract.save();

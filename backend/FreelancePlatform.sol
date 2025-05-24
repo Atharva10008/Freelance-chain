@@ -24,8 +24,6 @@ contract FreelancePlatform {
         string deliverables;
         bool workSubmitted;
         bool clientApproved;
-        bool clientSigned;
-        bool freelancerSigned;
     }
 
     struct Review {
@@ -63,7 +61,6 @@ contract FreelancePlatform {
     event RevisionRequested(uint256 indexed contractId);
     event PaymentReleased(uint256 indexed contractId, uint256 amount);
     event ReviewAdded(address indexed reviewee, address indexed reviewer, uint256 rating);
-    event Signed(uint256 indexed contractId, address indexed signer);
 
     // Modifiers
     modifier onlyClient(uint256 proposalId) {
@@ -97,6 +94,8 @@ contract FreelancePlatform {
     }
 
     // Functions
+
+    // Submit a new proposal
     function submitProposal(
         address client,
         string memory description,
@@ -125,6 +124,7 @@ contract FreelancePlatform {
         emit ProposalSubmitted(proposalId, msg.sender, client);
     }
 
+    // Client accepts, rejects, or negotiates a proposal
     function respondToProposal(
         uint256 proposalId,
         ProposalStatus status
@@ -135,12 +135,14 @@ contract FreelancePlatform {
         proposal.status = status;
 
         if (status == ProposalStatus.Accepted) {
+            // Create a new contract when proposal is accepted
             createContract(proposalId);
         }
 
         emit ProposalStatusChanged(proposalId, status);
     }
 
+    // Create a new contract from an accepted proposal
     function createContract(uint256 proposalId) internal {
         Proposal memory proposal = proposals[proposalId];
         
@@ -155,9 +157,7 @@ contract FreelancePlatform {
             status: ContractStatus.Created,
             deliverables: "",
             workSubmitted: false,
-            clientApproved: false,
-            clientSigned: false,
-            freelancerSigned: false
+            clientApproved: false
         });
 
         clientContracts[proposal.client].push(contractId);
@@ -166,6 +166,7 @@ contract FreelancePlatform {
         emit ContractCreated(contractId, proposalId);
     }
 
+    // Client funds the escrow
     function fundEscrow(uint256 contractId) external payable contractExists(contractId) onlyContractClient(contractId) {
         Contract storage contractData = contracts[contractId];
         require(contractData.status == ContractStatus.Created, "Contract must be in Created state");
@@ -176,6 +177,7 @@ contract FreelancePlatform {
         emit EscrowFunded(contractId, msg.value);
     }
 
+    // Freelancer submits work
     function submitWork(uint256 contractId, string memory deliverables) 
         external 
         contractExists(contractId) 
@@ -184,7 +186,6 @@ contract FreelancePlatform {
         Contract storage contractData = contracts[contractId];
         require(contractData.status == ContractStatus.Funded, "Contract must be funded first");
         require(bytes(deliverables).length > 0, "Deliverables cannot be empty");
-        require(block.timestamp <= contractData.deadline, "Contract deadline has passed");
 
         contractData.deliverables = deliverables;
         contractData.workSubmitted = true;
@@ -193,6 +194,7 @@ contract FreelancePlatform {
         emit WorkSubmitted(contractId, deliverables);
     }
 
+    // Client approves work
     function approveWork(uint256 contractId) 
         external 
         contractExists(contractId) 
@@ -205,11 +207,13 @@ contract FreelancePlatform {
         contractData.clientApproved = true;
         contractData.status = ContractStatus.Completed;
 
+        // Release payment to freelancer
         releasePayment(contractId);
 
         emit WorkApproved(contractId);
     }
 
+    // Client requests revision
     function requestRevision(uint256 contractId) 
         external 
         contractExists(contractId) 
@@ -224,17 +228,18 @@ contract FreelancePlatform {
         emit RevisionRequested(contractId);
     }
 
+    // Release payment to freelancer
     function releasePayment(uint256 contractId) internal {
         Contract storage contractData = contracts[contractId];
         require(contractData.clientApproved, "Work must be approved first");
         require(address(this).balance >= contractData.amount, "Insufficient contract balance");
 
-        (bool success, ) = payable(contractData.freelancer).call{value: contractData.amount}("");
-        require(success, "Payment transfer failed");
+        payable(contractData.freelancer).transfer(contractData.amount);
 
         emit PaymentReleased(contractId, contractData.amount);
     }
 
+    // Leave a review
     function leaveReview(
         address reviewee,
         uint256 rating,
@@ -252,36 +257,20 @@ contract FreelancePlatform {
             timestamp: block.timestamp
         }));
 
-        // Update reputation score
-        reputation[reviewee] += rating;
+        // Update reputation (simple average)
+        uint256 totalRating = 0;
+        uint256 reviewCount = reviews[reviewee].length;
+        
+        for (uint256 i = 0; i < reviewCount; i++) {
+            totalRating += reviews[reviewee][i].rating;
+        }
+        
+        reputation[reviewee] = totalRating / reviewCount;
 
         emit ReviewAdded(reviewee, msg.sender, rating);
     }
 
-    function signContract(uint256 contractId) external contractExists(contractId) {
-        Contract storage c = contracts[contractId];
-        require(msg.sender == c.client || msg.sender == c.freelancer, "Not a party");
-        if (msg.sender == c.client) {
-            require(!c.clientSigned, "Client already signed");
-            c.clientSigned = true;
-        } else {
-            require(!c.freelancerSigned, "Freelancer already signed");
-            c.freelancerSigned = true;
-        }
-        emit Signed(contractId, msg.sender);
-    }
-
-    // View functions
-    function getProposal(uint256 proposalId) external view returns (Proposal memory) {
-        require(proposalId > 0 && proposalId < nextProposalId, "Proposal does not exist");
-        return proposals[proposalId];
-    }
-
-    function getContract(uint256 contractId) external view returns (Contract memory) {
-        require(contractId > 0 && contractId < nextContractId, "Contract does not exist");
-        return contracts[contractId];
-    }
-
+    // Helper functions to get proposals and contracts
     function getClientProposals(address client) external view returns (uint256[] memory) {
         return clientProposals[client];
     }
@@ -302,7 +291,7 @@ contract FreelancePlatform {
         return reviews[user];
     }
 
-    function getReputation(address user) external view returns (uint256) {
+    function getUserReputation(address user) external view returns (uint256) {
         return reputation[user];
     }
 }

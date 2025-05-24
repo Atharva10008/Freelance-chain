@@ -18,16 +18,22 @@ export const ContractProvider = ({ children }) => {
       
       const token = localStorage.getItem('authToken');
       if (!token) {
+        console.error('No auth token found');
         throw new Error('Authentication required');
       }
 
+      console.log('Fetching contracts...');
       const response = await contractService.getUserContracts();
+      console.log('Contracts response:', response);
+
+      // The response is already the data array
       setContracts(response || []);
       return response;
     } catch (error) {
       console.error('Failed to fetch contracts:', error);
       setError(error.message);
       if (error.response?.status === 401) {
+        console.log('Unauthorized, redirecting to login');
         localStorage.removeItem('authToken');
         localStorage.removeItem('user');
         navigate('/signin');
@@ -41,81 +47,96 @@ export const ContractProvider = ({ children }) => {
     }
   }, [navigate]);
 
-  const getContract = useCallback(async (contractIdOrMongoId) => {
+  const getContract = useCallback(async (contractId) => {
     try {
-      // Try to find the contract in state first
-      const existingContract = contracts.find(c => 
-        c._id === contractIdOrMongoId || c.contractId?.toString() === contractIdOrMongoId
-      );
-
-      // If we have a complete contract in state, return it
+      // First check if we already have the contract in state
+      const existingContract = contracts.find(c => c._id === contractId);
       if (existingContract && existingContract.blockchainState) {
+        console.log('Contract found in state with blockchain state, skipping fetch');
         return existingContract;
       }
 
-      // Fetch from backend
-      const response = await contractService.getContract(contractIdOrMongoId);
+      console.log('Fetching contract:', contractId);
+      const response = await contractService.getContract(contractId);
+      console.log('Contract response:', response);
 
-      // Only try to fetch blockchain state if we have a valid contractId
-      if (
-        response &&
-        response.contractId &&
-        !isNaN(Number(response.contractId)) &&
-        response.blockchainState === undefined
-      ) {
-        try {
-          const blockchainState = await contractService.getContract(response.contractId);
-          response.blockchainState = blockchainState;
-        } catch (err) {
-          console.warn('Failed to fetch blockchain state:', err);
-        }
+      if (!response) {
+        console.warn('No response from getContract for ID:', contractId);
+        return existingContract || null;
       }
 
-      // Update state only if the contract is not already in state or needs updating
-      setContracts(prevContracts => {
-        const contractExists = prevContracts.some(c => 
-          c._id === response._id || c.contractId?.toString() === response.contractId?.toString()
-        );
-        
-        if (!contractExists) {
-          return [...prevContracts, response];
-        }
-        
-        return prevContracts.map(c => 
-          c._id === response._id || c.contractId?.toString() === response.contractId?.toString()
-            ? response
-            : c
-        );
-      });
+      // If we got a response but no blockchain state, and we have an existing contract
+      if (!response.blockchainState && existingContract) {
+        console.log('Merging existing contract with new response');
+        response.blockchainState = existingContract.blockchainState;
+      }
 
+      // Update the contract in the local state
+      setContracts(prevContracts => {
+        const updatedContracts = prevContracts.map(c => 
+          c._id === contractId ? response : c
+        );
+        if (!prevContracts.find(c => c._id === contractId)) {
+          updatedContracts.push(response);
+        }
+        console.log('Updated contracts state:', updatedContracts);
+        return updatedContracts;
+      });
+      
       return response;
     } catch (error) {
       console.error('Failed to fetch contract:', error);
+      // If we have an existing contract, return it even if blockchain state fetch failed
+      const existingContract = contracts.find(c => c._id === contractId);
+      if (existingContract) {
+        console.log('Returning existing contract after error:', existingContract);
+        return existingContract;
+      }
+      toast.error('Failed to fetch contract details: ' + error.message);
       throw error;
     }
   }, [contracts]);
 
-  const signContract = useCallback(async (contractId) => {
+  const signContract = async (contractId, signerAddress) => {
     try {
       setLoading(true);
-      const result = await contractService.signContract(contractId);
+      setError(null);
       
-      // Refresh the contract data after signing
-      await getContract(contractId);
+      console.log('Signing contract:', contractId, 'with address:', signerAddress);
+      const result = await contractService.signContract(contractId, signerAddress);
+      console.log('Sign contract response:', result);
+
+      // Update the contract in the list with new state
+      setContracts(prevContracts => {
+        const newContracts = prevContracts.map(c => 
+          c._id === contractId ? result : c
+        );
+        console.log('Updated contracts after signing:', newContracts);
+        return newContracts;
+      });
       
+      toast.success('Contract signed successfully');
       return result;
-    } catch (error) {
-      console.error('Error in ContractContext signContract:', error);
-      setError(error.message);
-      throw error;
+    } catch (err) {
+      console.error('Sign contract error:', err);
+      if (err.response?.status === 401) {
+        console.log('Unauthorized, redirecting to login');
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+        navigate('/signin');
+      }
+      setError(err.message);
+      toast.error('Failed to sign contract: ' + err.message);
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [getContract]);
+  };
 
   // Initial fetch of contracts
   useEffect(() => {
     const token = localStorage.getItem('authToken');
+    console.log('Initial contract fetch - token exists:', !!token);
     if (token) {
       fetchContracts(false).catch(console.error);
     } else {
@@ -132,6 +153,8 @@ export const ContractProvider = ({ children }) => {
     getContract
   };
 
+  console.log('Contract context state:', contextValue);
+
   return (
     <ContractContext.Provider value={contextValue}>
       {children}
@@ -139,4 +162,4 @@ export const ContractProvider = ({ children }) => {
   );
 };
 
-export const useContract = () => useContext(ContractContext);
+export const useContracts = () => useContext(ContractContext);

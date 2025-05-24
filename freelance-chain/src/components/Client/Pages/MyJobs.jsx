@@ -6,7 +6,6 @@ import { toast } from 'react-hot-toast';
 import { FileText } from 'lucide-react';
 import { useContracts } from '../../../context/ContractContext';
 import { createContractOnChain } from '../../../services/ContractOnChainService';
-import { CONTRACT_ADDRESS } from '../../../../utils/contract';
 
 const API_URL = 'http://localhost:5000'; // Update this if your backend runs elsewhere
 
@@ -63,7 +62,7 @@ const MyJobs = () => {
         jobTitle: job.title,
         jobDescription: job.description
       });
-      // 3. Save contract in backend (pass all required fields)
+      // 3. Save contract in backend
       const contract = await contractService.createContract(
         jobId,
         bidId,
@@ -74,7 +73,6 @@ const MyJobs = () => {
         job.description,
         new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         contractId,
-        CONTRACT_ADDRESS,
         txHash
       );
       // 4. Refresh data
