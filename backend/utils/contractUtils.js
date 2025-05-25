@@ -1,7 +1,7 @@
 const { ethers } = require('ethers');
 require('dotenv').config();
 const { CONTRACT_ABI } = require('../config/contractABI');
-const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x28dc611822c09167900a77f133D6C6a0615652d6';
+const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x03162D7C415dF0D30f546550Aa81f567a65a19A0';
 
 let provider;
 let signer;

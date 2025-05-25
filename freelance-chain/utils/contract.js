@@ -1,4 +1,4 @@
-export const CONTRACT_ADDRESS = "0xb7352fca78efc22ad6c8b1e3006f74f8c2abc535";
+export const CONTRACT_ADDRESS = "0x03162D7C415dF0D30f546550Aa81f567a65a19A0";
 
 export const CONTRACT_ABI = [
   {
@@ -200,6 +200,11 @@ export const CONTRACT_ABI = [
     "inputs": [
       {
         "internalType": "address",
+        "name": "_client",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
         "name": "_freelancer",
         "type": "address"
       },
@@ -222,6 +227,16 @@ export const CONTRACT_ABI = [
         "internalType": "string",
         "name": "_jobDescription",
         "type": "string"
+      },
+      {
+        "internalType": "address",
+        "name": "_clientSigner",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_freelancerSigner",
+        "type": "address"
       }
     ],
     "name": "createContract",

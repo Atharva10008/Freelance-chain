@@ -6,12 +6,16 @@ import { toast } from 'react-hot-toast';
 import { FileText } from 'lucide-react';
 import { useContracts } from '../../../context/ContractContext';
 import { createContractOnChain } from '../../../services/ContractOnChainService';
+import { useWeb3 } from '../../../context/Web3Context';
+import axios from 'axios';
+import { ethers } from 'ethers';
 
 const API_URL = 'http://localhost:5000'; // Update this if your backend runs elsewhere
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
 const MyJobs = () => {
   const { fetchContracts } = useContracts();
+  const { isConnected, connectWallet, account, provider, signer } = useWeb3();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -38,55 +42,130 @@ const MyJobs = () => {
   const fetchBids = async (jobId) => {
     try {
       const response = await bidService.getBidsForJob(jobId);
+      console.log('Fetched bids for job:', jobId, response.data);
       setBids(prev => ({ ...prev, [jobId]: response.data }));
     } catch (err) {
       console.error('Error fetching bids:', err);
     }
   };
 
-  const handleAcceptBid = async (bidId, jobId) => {
+  const handleAcceptBid = async (bid) => {
+    console.log('Attempting to accept bid:', bid);
     try {
-      setAcceptingBid(true);
-      // 1. Accept bid
-      await bidService.updateBidStatus(bidId, { status: 'accepted' });
-      // 2. Create contract on-chain using MetaMask
-      const bid = bids[jobId].find(b => b._id === bidId);
-      const job = jobs.find(j => j._id === jobId);
-      if (!bid || !bid.freelancerAddress) {
-        throw new Error('Freelancer address not found in bid data');
+      if (!isConnected) {
+        await connectWallet();
       }
-      // Call MetaMask to create contract on-chain
-      const { contractId, txHash } = await createContractOnChain({
-        freelancerAddress: bid.freelancerAddress,
-        bidAmount: bid.bidAmount,
-        deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        jobTitle: job.title,
-        jobDescription: job.description
-      });
-      // 3. Save contract in backend
-      const contract = await contractService.createContract(
-        jobId,
-        bidId,
-        bid.freelancerId,
-        bid.freelancerAddress,
-        bid.bidAmount,
-        job.title,
-        job.description,
-        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        contractId,
-        CONTRACT_ADDRESS, // Add the contract address
-        txHash
+
+      if (!provider || !signer) {
+        throw new Error("Please connect your wallet first");
+      }
+
+      // Get the deployed contract address from your environment or configuration
+      const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS;
+      // You should ideally import the full ABI from a separate file
+      // For now, we'll include the necessary function signatures and events
+      const contractABI = [
+        "function createContract(address _freelancer, uint256 _bidAmount, uint256 _deadline, string memory _jobTitle, string memory _jobDescription) external returns (uint256)",
+        // Add the ContractCreated event ABI
+        "event ContractCreated(uint256 contractId)",
+        // Remove depositFunds and clientSignContract calls here
+        // They should be separate steps initiated by the user later
+      ];
+
+      // Create contract instance with proper network configuration
+      const contract = new ethers.Contract(
+        contractAddress,
+        contractABI,
+        signer
       );
-      // 4. Refresh data
-      await fetchContracts();
-      await fetchBids(jobId);
-      // 5. Navigate to the contract view
-      navigate(`/contracts/${contract._id}`);
+
+      // Calculate deadline (e.g., 1 month from now) - adjust as needed
+      // Ensure this deadline is in the future
+      const deadline = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+
+      // Convert bid amount to the smallest unit (like wei, assuming 18 decimals for VG)
+      // Use ethers.utils.parseEther for this conversion
+      const bidAmountInWei = ethers.utils.parseEther(bid.bidAmount.toString());
+
+      console.log('Creating contract with params:', {
+        freelancerAddress: bid.freelancerAddress,
+        bidAmount: bidAmountInWei.toString(), // Log as string for readability
+        deadline: deadline,
+        jobTitle: bid.jobTitle || "Job Contract",
+        jobDescription: bid.proposal || "Job Description"
+      });
+
+      // Create the contract on chain
+      const tx = await contract.createContract(
+        bid.freelancerAddress,
+        bidAmountInWei,
+        deadline,
+        bid.jobTitle || "Job Contract",
+        bid.proposal || "Job Description"
+      );
+
+      // Wait for transaction to be mined
+      const receipt = await tx.wait();
+      
+      console.log('Transaction receipt:', receipt);
+
+      // --- Check Transaction Status --- START
+      if (receipt.status === 0) {
+          console.error('Transaction failed on chain (reverted). Full receipt:', receipt);
+          throw new Error('Transaction failed on chain (execution reverted). Please check contract logic and parameters.');
+      }
+      // --- Check Transaction Status --- END
+
+      // --- Event Handling --- START
+      let contractId;
+      
+      // Check for events in the receipt
+      if (receipt.events && receipt.events.length > 0) {
+          const contractCreatedEvent = receipt.events.find(e => e.event === 'ContractCreated');
+
+          if (contractCreatedEvent) {
+              console.log('ContractCreated event found:', contractCreatedEvent);
+
+              // Try accessing by name (ethers v5)
+              if (contractCreatedEvent.args && contractCreatedEvent.args.contractId !== undefined) {
+                  contractId = contractCreatedEvent.args.contractId;
+                  console.log('ContractId found by name:', contractId.toString());
+              // Try accessing by index (fallback)
+              } else if (contractCreatedEvent.args && contractCreatedEvent.args.length > 0) {
+                   // Assuming contractId is the first argument
+                  contractId = contractCreatedEvent.args[0];
+                  console.log('ContractId found by index:', contractId.toString());
+              }
+          }
+      }
+
+      if (contractId === undefined || contractId === null) {
+          console.error('Full receipt object:', receipt);
+          throw new Error('ContractCreated event not found or contractId is undefined/null in transaction receipt.');
+      }
+      // --- Event Handling --- END
+
+      console.log('Contract created successfully with ID:', contractId.toString());
+
+      // Update bid status in database with the created contract ID
+      await axios.put(`${API_URL}/api/bids/${bid._id}/accept`, {
+        contractId: contractId.toString(), // Store the contract ID
+        transactionHash: receipt.transactionHash // Store the transaction hash
+      });
+
+      // Show success message
+      toast.success('Bid accepted successfully!');
+      
+      // Refresh the bids list for this job
+      fetchBids(bid.jobId);
+
+      // Optionally navigate to the new contract page
+      // navigate(`/contracts/${contractId.toString()}`);
+
     } catch (error) {
       console.error('Error accepting bid:', error);
-      toast.error(error.message || 'Failed to accept bid');
-    } finally {
-      setAcceptingBid(false);
+      // Provide a more user-friendly error message
+      toast.error(error.message || 'Error creating contract on chain.');
     }
   };
 
@@ -277,102 +356,105 @@ const MyJobs = () => {
                       </div>
                     ) : bids[job._id]?.length > 0 ? (
                       <div className="space-y-4">
-                        {bids[job._id].map(bid => (
-                          <div key={bid._id} className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                            <div className="p-4 bg-white border-b border-gray-200">
-                              <div className="flex justify-between items-start">
-                                <div className="flex items-center">
-                                  <div className="h-10 w-10 rounded-full bg-primary text-white flex items-center justify-center font-bold text-lg mr-3">
-                                    {(bid.freelancer?.name?.[0] || bid.freelancerId?.name?.[0] || 'U').toUpperCase()}
-                                  </div>
-                                  <div>
-                                    <p className="font-semibold text-lg">{bid.freelancer?.name || bid.freelancerId?.name || 'Unknown Freelancer'}</p>
-                                    <div className="flex items-center text-sm text-gray-500">
-                                      <span>Rating: 4.8/5</span>
-                                      <span className="mx-2">•</span>
-                                      <span>12 jobs completed</span>
+                        {bids[job._id].map(bid => {
+                          console.log('Rendering bid:', bid);
+                          return (
+                            <div key={bid._id} className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+                              <div className="p-4 bg-white border-b border-gray-200">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center">
+                                    <div className="h-10 w-10 rounded-full bg-primary text-white flex items-center justify-center font-bold text-lg mr-3">
+                                      {(bid.freelancer?.name?.[0] || bid.freelancerId?.name?.[0] || 'U').toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <p className="font-semibold text-lg">{bid.freelancer?.name || bid.freelancerId?.name || 'Unknown Freelancer'}</p>
+                                      <div className="flex items-center text-sm text-gray-500">
+                                        <span>Rating: 4.8/5</span>
+                                        <span className="mx-2">•</span>
+                                        <span>12 jobs completed</span>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-lg font-bold text-accent">${bid.bidAmount}</p>
-                                  <p className="text-sm text-gray-500">{bid.estimatedTime}</p>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="p-4">
-                              <p className="text-gray-700 mb-4">{bid.proposal}</p>
-                              {bid.bidMedia && bid.bidMedia.length > 0 && (
-                                <div className="mb-4">
-                                  <h4 className="font-semibold text-sm mb-2">Supporting Documents:</h4>
-                                  <div className="flex flex-wrap gap-2">
-                                    {bid.bidMedia.map((media, idx) => (
-                                      <div
-                                        key={idx}
-                                        onClick={() => handleFileClick(media)}
-                                        className="flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-xs cursor-pointer"
-                                      >
-                                        {media.type === 'image' ? (
-                                           <img
-                                             src={`${import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:5000'}${media.url}`}
-                                             alt={media.name}
-                                             className="h-5 w-5 object-cover rounded mr-1"
-                                            />
-                                        ) : (
-                                          <FileText className="h-4 w-4 mr-1" />
-                                        )}
-                                        <span className="mr-1">{media.name}</span>
-                                      </div>
-                                    ))}
+                                  <div className="text-right">
+                                    <p className="text-lg font-bold text-accent">${bid.bidAmount}</p>
+                                    <p className="text-sm text-gray-500">{bid.estimatedTime}</p>
                                   </div>
                                 </div>
-                              )}
-                              <div className="flex flex-wrap justify-end space-x-3">
-                                <Link
-                                  to={`/bids/${bid._id}`}
-                                  className="px-4 py-2 rounded-md font-medium border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-200"
-                                >
-                                  View Bid
-                                </Link>
-                                <button 
-                                  onClick={() => handleRejectBid(bid._id, job._id)}
-                                  className={`px-4 py-2 rounded-md font-medium transition-colors duration-200 ${
-                                    bid.status === 'rejected'
-                                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                      : 'border border-red-500 text-red-500 hover:bg-red-50'
-                                  }`}
-                                  disabled={bid.status === 'rejected' || bid.status === 'accepted'}
-                                >
-                                  {bid.status === 'rejected' ? 'Rejected' : 'Decline'}
-                                </button>
-                                <button
-                                  onClick={() => handleMessageFreelancer(bid.freelancer?._id || bid.freelancerId?._id)}
-                                  className="px-4 py-2 rounded-md font-medium border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-200"
-                                >
-                                  Message
-                                </button>
-                                <button 
-                                  onClick={() => handleAcceptBid(bid._id, job._id)}
-                                  className={`px-4 py-2 rounded-md font-medium ${
-                                    bid.status === 'accepted'
-                                      ? 'bg-green-100 text-green-700 cursor-not-allowed'
-                                      : 'bg-highlight text-white hover:bg-opacity-90'
-                                  } transition-colors duration-200`}
-                                  disabled={bid.status === 'accepted' || bid.status === 'rejected'}
-                                >
-                                  {bid.status === 'accepted' ? (
-                                    <span className="flex items-center">
-                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                      </svg>
-                                      Accepted
-                                    </span>
-                                  ) : 'Accept Proposal'}
-                                </button>
+                              </div>
+                              <div className="p-4">
+                                <p className="text-gray-700 mb-4">{bid.proposal}</p>
+                                {bid.bidMedia && bid.bidMedia.length > 0 && (
+                                  <div className="mb-4">
+                                    <h4 className="font-semibold text-sm mb-2">Supporting Documents:</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                      {bid.bidMedia.map((media, idx) => (
+                                        <div
+                                          key={idx}
+                                          onClick={() => handleFileClick(media)}
+                                          className="flex items-center px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-xs cursor-pointer"
+                                        >
+                                          {media.type === 'image' ? (
+                                             <img
+                                               src={`${import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:5000'}${media.url}`}
+                                               alt={media.name}
+                                               className="h-5 w-5 object-cover rounded mr-1"
+                                              />
+                                          ) : (
+                                            <FileText className="h-4 w-4 mr-1" />
+                                          )}
+                                          <span className="mr-1">{media.name}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="flex flex-wrap justify-end space-x-3">
+                                  <Link
+                                    to={`/bids/${bid._id}`}
+                                    className="px-4 py-2 rounded-md font-medium border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-200"
+                                  >
+                                    View Bid
+                                  </Link>
+                                  <button 
+                                    onClick={() => handleRejectBid(bid._id, job._id)}
+                                    className={`px-4 py-2 rounded-md font-medium transition-colors duration-200 ${
+                                      bid.status === 'rejected'
+                                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        : 'border border-red-500 text-red-500 hover:bg-red-50'
+                                    }`}
+                                    disabled={bid.status === 'rejected' || bid.status === 'accepted'}
+                                  >
+                                    {bid.status === 'rejected' ? 'Rejected' : 'Decline'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleMessageFreelancer(bid.freelancer?._id || bid.freelancerId?._id)}
+                                    className="px-4 py-2 rounded-md font-medium border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-200"
+                                  >
+                                    Message
+                                  </button>
+                                  <button 
+                                    onClick={() => handleAcceptBid(bid)}
+                                    className={`px-4 py-2 rounded-md font-medium ${
+                                      bid.status === 'accepted'
+                                        ? 'bg-green-100 text-green-700 cursor-not-allowed'
+                                        : 'bg-highlight text-white hover:bg-opacity-90'
+                                    } transition-colors duration-200`}
+                                    disabled={bid.status === 'accepted' || bid.status === 'rejected'}
+                                  >
+                                    {bid.status === 'accepted' ? (
+                                      <span className="flex items-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                        </svg>
+                                        Accepted
+                                      </span>
+                                    ) : 'Accept Proposal'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="bg-gray-50 rounded-lg p-8 text-center">
