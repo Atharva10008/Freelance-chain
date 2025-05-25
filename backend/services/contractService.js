@@ -35,18 +35,21 @@ exports.createContract = async (freelancerAddress, bidAmount, deadline, jobTitle
 
 exports.getContractState = async (contractId) => {
   try {
-    const contractData = await contract.methods.getContract(contractId).call();
+    const contractData = await contract.methods.contracts(contractId).call();
     
     return {
       client: contractData.client,
       freelancer: contractData.freelancer,
-      bidAmount: web3.utils.fromWei(contractData.bidAmount, 'ether'),
+      bidAmount: web3.utils.fromWei(contractData.amount, 'ether'),
       deadline: new Date(contractData.deadline * 1000),
       jobTitle: contractData.jobTitle,
       jobDescription: contractData.jobDescription,
-      status: ['Created', 'Funded', 'InProgress', 'Completed', 'Disputed'][contractData.status],
-      workSubmissionHash: contractData.workSubmissionHash,
-      fundsDeposited: web3.utils.fromWei(contractData.fundsDeposited, 'ether')
+      status: contractData.status,
+      clientSigned: contractData.clientSigned,
+      freelancerSigned: contractData.freelancerSigned,
+      workSubmitted: contractData.workSubmitted,
+      clientApproved: contractData.clientApproved,
+      deliverables: contractData.deliverables
     };
   } catch (error) {
     console.error('Error getting contract state:', error);
@@ -54,21 +57,32 @@ exports.getContractState = async (contractId) => {
   }
 };
 
-exports.depositFunds = async (contractId, amount, fromAddress) => {
+exports.clientSignContract = async (contractId, amount, fromAddress) => {
   try {
     const amountWei = web3.utils.toWei(amount.toString(), 'ether');
-    const tx = await contract.methods.depositFunds(contractId)
+    const tx = await contract.methods.clientSignContract(contractId)
       .send({ from: fromAddress, value: amountWei });
     return tx.transactionHash;
   } catch (error) {
-    console.error('Error depositing funds:', error);
+    console.error('Error signing contract as client:', error);
     throw error;
   }
 };
 
-exports.submitWork = async (contractId, workHash, fromAddress) => {
+exports.freelancerSignContract = async (contractId, fromAddress) => {
   try {
-    const tx = await contract.methods.submitWork(contractId, workHash)
+    const tx = await contract.methods.freelancerSignContract(contractId)
+      .send({ from: fromAddress });
+    return tx.transactionHash;
+  } catch (error) {
+    console.error('Error signing contract as freelancer:', error);
+    throw error;
+  }
+};
+
+exports.submitWork = async (contractId, deliverables, fromAddress) => {
+  try {
+    const tx = await contract.methods.submitWork(contractId, deliverables)
       .send({ from: fromAddress });
     return tx.transactionHash;
   } catch (error) {
@@ -88,14 +102,13 @@ exports.approveWork = async (contractId, fromAddress) => {
   }
 };
 
-exports.raiseDispute = async (contractId, fromAddress) => {
+exports.rejectWork = async (contractId, fromAddress) => {
   try {
-    const disputeFee = await contract.methods.disputeFee().call();
-    const tx = await contract.methods.raiseDispute(contractId)
-      .send({ from: fromAddress, value: disputeFee });
+    const tx = await contract.methods.rejectWork(contractId)
+      .send({ from: fromAddress });
     return tx.transactionHash;
   } catch (error) {
-    console.error('Error raising dispute:', error);
+    console.error('Error rejecting work:', error);
     throw error;
   }
 };

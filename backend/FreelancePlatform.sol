@@ -22,6 +22,8 @@ contract FreelancePlatform {
         uint256 deadline;
         ContractStatus status;
         string deliverables;
+        bool clientSigned;
+        bool freelancerSigned;
         bool workSubmitted;
         bool clientApproved;
     }
@@ -36,7 +38,14 @@ contract FreelancePlatform {
 
     // Enums
     enum ProposalStatus { Pending, Accepted, Rejected, Negotiating }
-    enum ContractStatus { Created, Funded, InProgress, Completed, Disputed }
+    enum ContractStatus { 
+        Created,      // Contract created but not signed
+        ClientSigned, // Client has signed and deposited funds
+        Active,       // Both parties have signed
+        InProgress,   // Work is in progress
+        Completed,    // Work completed and approved
+        Disputed      // Contract is in dispute
+    }
 
     // State Variables
     uint256 public nextProposalId = 1;
@@ -55,9 +64,10 @@ contract FreelancePlatform {
     event ProposalSubmitted(uint256 indexed proposalId, address indexed freelancer, address indexed client);
     event ProposalStatusChanged(uint256 indexed proposalId, ProposalStatus status);
     event ContractCreated(uint256 indexed contractId, uint256 indexed proposalId);
-    event EscrowFunded(uint256 indexed contractId, uint256 amount);
+    event ContractSigned(uint256 indexed contractId, address indexed signer);
     event WorkSubmitted(uint256 indexed contractId, string deliverables);
     event WorkApproved(uint256 indexed contractId);
+    event WorkRejected(uint256 indexed contractId);
     event RevisionRequested(uint256 indexed contractId);
     event PaymentReleased(uint256 indexed contractId, uint256 amount);
     event ReviewAdded(address indexed reviewee, address indexed reviewer, uint256 rating);
@@ -156,6 +166,8 @@ contract FreelancePlatform {
             deadline: block.timestamp + (proposal.duration * 1 days),
             status: ContractStatus.Created,
             deliverables: "",
+            clientSigned: false,
+            freelancerSigned: false,
             workSubmitted: false,
             clientApproved: false
         });
@@ -166,15 +178,29 @@ contract FreelancePlatform {
         emit ContractCreated(contractId, proposalId);
     }
 
-    // Client funds the escrow
-    function fundEscrow(uint256 contractId) external payable contractExists(contractId) onlyContractClient(contractId) {
+    // Client signs contract and deposits funds
+    function clientSignContract(uint256 contractId) external payable contractExists(contractId) onlyContractClient(contractId) {
         Contract storage contractData = contracts[contractId];
         require(contractData.status == ContractStatus.Created, "Contract must be in Created state");
         require(msg.value == contractData.amount, "Amount must match contract value");
+        require(!contractData.clientSigned, "Client already signed");
 
-        contractData.status = ContractStatus.Funded;
+        contractData.clientSigned = true;
+        contractData.status = ContractStatus.ClientSigned;
 
-        emit EscrowFunded(contractId, msg.value);
+        emit ContractSigned(contractId, msg.sender);
+    }
+
+    // Freelancer signs contract
+    function freelancerSignContract(uint256 contractId) external contractExists(contractId) onlyContractFreelancer(contractId) {
+        Contract storage contractData = contracts[contractId];
+        require(contractData.status == ContractStatus.ClientSigned, "Client must sign first");
+        require(!contractData.freelancerSigned, "Freelancer already signed");
+
+        contractData.freelancerSigned = true;
+        contractData.status = ContractStatus.Active;
+
+        emit ContractSigned(contractId, msg.sender);
     }
 
     // Freelancer submits work
@@ -184,7 +210,7 @@ contract FreelancePlatform {
         onlyContractFreelancer(contractId) 
     {
         Contract storage contractData = contracts[contractId];
-        require(contractData.status == ContractStatus.Funded, "Contract must be funded first");
+        require(contractData.status == ContractStatus.Active, "Contract must be active");
         require(bytes(deliverables).length > 0, "Deliverables cannot be empty");
 
         contractData.deliverables = deliverables;
@@ -211,6 +237,20 @@ contract FreelancePlatform {
         releasePayment(contractId);
 
         emit WorkApproved(contractId);
+    }
+
+    // Client rejects work
+    function rejectWork(uint256 contractId) 
+        external 
+        contractExists(contractId) 
+        onlyContractClient(contractId) 
+    {
+        Contract storage contractData = contracts[contractId];
+        require(contractData.workSubmitted, "Work must be submitted first");
+        require(!contractData.clientApproved, "Work already approved");
+
+        contractData.status = ContractStatus.Disputed;
+        emit WorkRejected(contractId);
     }
 
     // Client requests revision

@@ -8,6 +8,7 @@ import { useContracts } from '../../../context/ContractContext';
 import { createContractOnChain } from '../../../services/ContractOnChainService';
 
 const API_URL = 'http://localhost:5000'; // Update this if your backend runs elsewhere
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
 const MyJobs = () => {
   const { fetchContracts } = useContracts();
@@ -73,12 +74,13 @@ const MyJobs = () => {
         job.description,
         new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         contractId,
+        CONTRACT_ADDRESS, // Add the contract address
         txHash
       );
       // 4. Refresh data
       await fetchContracts();
       await fetchBids(jobId);
-      // 5. Navigate
+      // 5. Navigate to the contract view
       navigate(`/contracts/${contract._id}`);
     } catch (error) {
       console.error('Error accepting bid:', error);

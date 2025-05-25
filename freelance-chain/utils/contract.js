@@ -199,6 +199,58 @@ export const CONTRACT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "_freelancer",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_bidAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_deadline",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_jobTitle",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_jobDescription",
+        "type": "string"
+      }
+    ],
+    "name": "createContract",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "depositFunds",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
@@ -268,224 +320,6 @@ export const CONTRACT_ABI = [
   {
     "inputs": [
       {
-        "internalType": "address",
-        "name": "_freelancer",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "_bidAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "_deadline",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "_jobTitle",
-        "type": "string"
-      },
-      {
-        "internalType": "string",
-        "name": "_jobDescription",
-        "type": "string"
-      }
-    ],
-    "name": "createContract",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "depositFunds",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "disputeFee",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "name": "escrowBalances",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "getContract",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "client",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "freelancer",
-        "type": "address"
-      },
-      {
-        "internalType": "uint256",
-        "name": "bidAmount",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "deadline",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "jobTitle",
-        "type": "string"
-      },
-      {
-        "internalType": "string",
-        "name": "jobDescription",
-        "type": "string"
-      },
-      {
-        "internalType": "enum JobContract.Status",
-        "name": "status",
-        "type": "uint8"
-      },
-      {
-        "internalType": "string",
-        "name": "workSubmissionHash",
-        "type": "string"
-      },
-      {
-        "internalType": "uint256",
-        "name": "fundsDeposited",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "owner",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "raiseDispute",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "requestRefund",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "clientShare",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "freelancerShare",
-        "type": "uint256"
-      }
-    ],
-    "name": "resolveDispute",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_newFee",
-        "type": "uint256"
-      }
-    ],
-    "name": "setDisputeFee",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "uint256",
         "name": "_contractId",
         "type": "uint256"
@@ -510,13 +344,6 @@ export const CONTRACT_ABI = [
       }
     ],
     "name": "submitWork",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "withdrawStuckFunds",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
