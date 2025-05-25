@@ -133,6 +133,32 @@ export const ContractProvider = ({ children }) => {
     }
   };
 
+  const depositFunds = useCallback(async (contractId, amount) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await contractService.depositFunds(contractId, amount);
+      
+      // Update the contract in the list with new state
+      setContracts(prevContracts => {
+        return prevContracts.map(c => 
+          c._id === contractId ? response : c
+        );
+      });
+      
+      toast.success('Funds deposited successfully');
+      return response;
+    } catch (err) {
+      console.error('Deposit funds error:', err);
+      setError(err.message);
+      toast.error('Failed to deposit funds: ' + err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Initial fetch of contracts
   useEffect(() => {
     const token = localStorage.getItem('authToken');
@@ -149,6 +175,7 @@ export const ContractProvider = ({ children }) => {
     loading,
     error,
     signContract,
+    depositFunds,
     fetchContracts,
     getContract
   };
@@ -162,4 +189,10 @@ export const ContractProvider = ({ children }) => {
   );
 };
 
-export const useContracts = () => useContext(ContractContext);
+export const useContracts = () => {
+  const context = useContext(ContractContext);
+  if (!context) {
+    throw new Error('useContracts must be used within a ContractProvider');
+  }
+  return context;
+};
