@@ -15,8 +15,8 @@ const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
  */
 export async function createContractOnChain({ freelancerAddress, bidAmount, deadline, jobTitle, jobDescription }) {
   if (!window.ethereum) throw new Error('MetaMask not detected');
-  const provider = new ethers.BrowserProvider(window.ethereum);
-  const signer = await provider.getSigner();
+  const provider = new ethers.providers.Web3Provider(window.ethereum);
+  const signer = provider.getSigner();
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
   // Prepare deadline as unix timestamp
@@ -25,7 +25,7 @@ export async function createContractOnChain({ freelancerAddress, bidAmount, dead
   // Call the contract creation function
   const tx = await contract.createContract(
     freelancerAddress,
-    ethers.parseEther(bidAmount.toString()),
+    ethers.utils.parseEther(bidAmount.toString()),
     deadlineTimestamp,
     jobTitle,
     jobDescription
