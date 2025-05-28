@@ -10,8 +10,8 @@ import { useWeb3 } from '../../../context/Web3Context';
 import axios from 'axios';
 import { ethers } from 'ethers';
 
-const API_URL = 'http://localhost:5000'; // Update this if your backend runs elsewhere
-const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
+// Assuming API_URL is defined elsewhere or imported
+const API_URL = import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:5000';
 
 const MyJobs = () => {
   const { fetchContracts } = useContracts();
@@ -50,122 +50,82 @@ const MyJobs = () => {
   };
 
   const handleAcceptBid = async (bid) => {
-    console.log('Attempting to accept bid:', bid);
     try {
       if (!isConnected) {
         await connectWallet();
       }
-
       if (!provider || !signer) {
-        throw new Error("Please connect your wallet first");
+        throw new Error("Connect wallet first");
       }
 
-      // Get the deployed contract address from your environment or configuration
-      const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS;
-      // You should ideally import the full ABI from a separate file
-      // For now, we'll include the necessary function signatures and events
-      const contractABI = [
-        "function createContract(address _freelancer, uint256 _bidAmount, uint256 _deadline, string memory _jobTitle, string memory _jobDescription) external returns (uint256)",
-        // Add the ContractCreated event ABI
-        "event ContractCreated(uint256 contractId)",
-        // Remove depositFunds and clientSignContract calls here
-        // They should be separate steps initiated by the user later
-      ];
+      const currentAddress = await signer.getAddress();
+      // Assuming bid.freelancerAddress is available and correct
+      if (currentAddress.toLowerCase() === bid.freelancerAddress?.toLowerCase()) {
+        throw new Error("Cannot accept your own bid");
+      }
 
-      // Create contract instance with proper network configuration
-      const contract = new ethers.Contract(
-        contractAddress,
-        contractABI,
+      setAcceptingBid(true);
+
+      // Prepare contract data
+      const contractData = {
+        freelancerAddress: bid.freelancerAddress,
+        bidAmount: bid.bidAmount,
+        deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+        jobTitle: bid.job?.title || bid.jobTitle || "Job Contract",
+        jobDescription: bid.job?.description || bid.proposal || "Job Description",
+        provider: provider,
+        signer: signer
+      };
+
+      console.log('Creating contract with params:', contractData);
+
+      console.log('Parameters passed to createContractOnChain:', {
+        freelancerAddress: contractData.freelancerAddress,
+        bidAmount: contractData.bidAmount,
+        deadline: contractData.deadline,
+        jobTitle: contractData.jobTitle,
+        jobDescription: contractData.jobDescription
+      });
+
+      // Create on blockchain
+      const blockchainResult = await createContractOnChain(contractData);
+
+      console.log('Blockchain contract created:', blockchainResult);
+
+      // Save to backend - using the contractService function
+      const backendContract = await contractService.createContract(
+        bid.jobId,
+        bid._id,
+        bid.freelancerId,
+        bid.freelancerAddress,
+        bid.bidAmount,
+        contractData.jobTitle,
+        contractData.jobDescription,
+        contractData.deadline,
+        provider,
         signer
       );
 
-      // Calculate deadline (e.g., 1 month from now) - adjust as needed
-      // Ensure this deadline is in the future
-      const deadline = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60); // 30 days in seconds
+      console.log('Backend contract created:', backendContract);
 
-      // Convert bid amount to the smallest unit (like wei, assuming 18 decimals for VG)
-      // Use ethers.utils.parseEther for this conversion
-      const bidAmountInWei = ethers.utils.parseEther(bid.bidAmount.toString());
-
-      console.log('Creating contract with params:', {
-        freelancerAddress: bid.freelancerAddress,
-        bidAmount: bidAmountInWei.toString(), // Log as string for readability
-        deadline: deadline,
-        jobTitle: bid.jobTitle || "Job Contract",
-        jobDescription: bid.proposal || "Job Description"
+      // Update bid status
+      await bidService.updateBidStatus(bid._id, {
+        status: 'accepted'
       });
 
-      // Create the contract on chain
-      const tx = await contract.createContract(
-        bid.freelancerAddress,
-        bidAmountInWei,
-        deadline,
-        bid.jobTitle || "Job Contract",
-        bid.proposal || "Job Description"
-      );
+      toast.success('Bid accepted and contract created successfully!');
 
-      // Wait for transaction to be mined
-      const receipt = await tx.wait();
-      
-      console.log('Transaction receipt:', receipt);
-
-      // --- Check Transaction Status --- START
-      if (receipt.status === 0) {
-          console.error('Transaction failed on chain (reverted). Full receipt:', receipt);
-          throw new Error('Transaction failed on chain (execution reverted). Please check contract logic and parameters.');
-      }
-      // --- Check Transaction Status --- END
-
-      // --- Event Handling --- START
-      let contractId;
-      
-      // Check for events in the receipt
-      if (receipt.events && receipt.events.length > 0) {
-          const contractCreatedEvent = receipt.events.find(e => e.event === 'ContractCreated');
-
-          if (contractCreatedEvent) {
-              console.log('ContractCreated event found:', contractCreatedEvent);
-
-              // Try accessing by name (ethers v5)
-              if (contractCreatedEvent.args && contractCreatedEvent.args.contractId !== undefined) {
-                  contractId = contractCreatedEvent.args.contractId;
-                  console.log('ContractId found by name:', contractId.toString());
-              // Try accessing by index (fallback)
-              } else if (contractCreatedEvent.args && contractCreatedEvent.args.length > 0) {
-                   // Assuming contractId is the first argument
-                  contractId = contractCreatedEvent.args[0];
-                  console.log('ContractId found by index:', contractId.toString());
-              }
-          }
-      }
-
-      if (contractId === undefined || contractId === null) {
-          console.error('Full receipt object:', receipt);
-          throw new Error('ContractCreated event not found or contractId is undefined/null in transaction receipt.');
-      }
-      // --- Event Handling --- END
-
-      console.log('Contract created successfully with ID:', contractId.toString());
-
-      // Update bid status in database with the created contract ID
-      await axios.put(`${API_URL}/api/bids/${bid._id}/accept`, {
-        contractId: contractId.toString(), // Store the contract ID
-        transactionHash: receipt.transactionHash // Store the transaction hash
-      });
-
-      // Show success message
-      toast.success('Bid accepted successfully!');
-      
       // Refresh the bids list for this job
       fetchBids(bid.jobId);
 
-      // Optionally navigate to the new contract page
-      // navigate(`/contracts/${contractId.toString()}`);
+      // Navigate to the new contract page
+      navigate(`/contracts/${backendContract._id}`);
 
     } catch (error) {
       console.error('Error accepting bid:', error);
-      // Provide a more user-friendly error message
-      toast.error(error.message || 'Error creating contract on chain.');
+      toast.error(error.message || 'Failed to accept bid and create contract');
+    } finally {
+      setAcceptingBid(false);
     }
   };
 

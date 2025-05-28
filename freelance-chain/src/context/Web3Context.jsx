@@ -15,19 +15,19 @@ export const Web3Provider = ({ children }) => {
   const [isAuthorizedSigner, setIsAuthorizedSigner] = useState(false);
 
   // Define both hex and numeric versions
-  const VANGUARD_CHAIN_ID = '0x13314'; // Hex string for MetaMask
+  const VANGUARD_CHAIN_ID_HEX = '0x13308'; // Hex string for MetaMask (78600)
   const VANGUARD_CHAIN_ID_NUM = 78600; // Numeric for comparisons
   
   const VANGUARD_NETWORK = {
-    chainId: VANGUARD_CHAIN_ID,
-    chainName: 'Vanguard',
+    chainId: VANGUARD_CHAIN_ID_HEX,
+    chainName: 'Vanguard Testnet',
     nativeCurrency: {
-      name: 'VG',
+      name: 'Vanguard',
       symbol: 'VG',
       decimals: 18
     },
     rpcUrls: ['https://rpc-vanguard.vanarchain.com'],
-    blockExplorerUrls: ['https://explorer.vanarchain.com']
+    blockExplorerUrls: ['https://explorer-vanguard.vanarchain.com']
   };
 
   const checkSignerAuthorization = async (address) => {
@@ -50,24 +50,29 @@ export const Web3Provider = ({ children }) => {
   const connectWallet = async () => {
     try {
       if (!window.ethereum) {
-        throw new Error('Please install MetaMask');
+        throw new Error('MetaMask not detected');
       }
 
+      // Request account access
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      
-      // Get current chain ID as number
-      const network = await provider.getNetwork();
-      const currentChainId = network.chainId;
+      const account = accounts[0];
 
-      // Compare numbers
-      if (currentChainId !== VANGUARD_CHAIN_ID_NUM) {
+      // Create a provider with Vanguard network settings and ENS disabled
+      const provider = new ethers.providers.Web3Provider(window.ethereum, 'any'); // Use 'any' to let MetaMask handle network
+
+      // Get the signer
+      const signer = provider.getSigner();
+
+      // Check if we're on the correct network
+      const network = await provider.getNetwork();
+      if (network.chainId !== VANGUARD_CHAIN_ID_NUM) {
         try {
           await window.ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: VANGUARD_CHAIN_ID }], // Use hex string here
+            params: [{ chainId: VANGUARD_CHAIN_ID_HEX }],
           });
         } catch (switchError) {
+          // This error code indicates that the chain has not been added to MetaMask
           if (switchError.code === 4902) {
             try {
               await window.ethereum.request({
@@ -78,21 +83,22 @@ export const Web3Provider = ({ children }) => {
               throw new Error('Failed to add Vanguard network to MetaMask');
             }
           } else {
-            throw switchError;
+            throw new Error('Failed to switch to Vanguard network');
           }
         }
+        // After switching or adding, refresh to ensure provider is updated
+        window.location.reload();
+        return; // Stop execution here, page will reload
       }
 
-      const signer = provider.getSigner();
-      const address = await signer.getAddress();
-
+      setAccount(account);
       setProvider(provider);
       setSigner(signer);
-      setAccount(address);
       setIsConnected(true);
-      setChainId(VANGUARD_CHAIN_ID_NUM); // Store numeric version
+      setChainId(network.chainId); // Set chainId after successful connection/switch
 
-      await checkSignerAuthorization(address);
+      // Check authorization only after connected and on correct network
+      checkSignerAuthorization(account);
 
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -115,6 +121,7 @@ export const Web3Provider = ({ children }) => {
         disconnectWallet();
       } else {
         setAccount(accounts[0]);
+        // Re-check authorization for the new account
         checkSignerAuthorization(accounts[0]);
       }
     };
@@ -122,32 +129,55 @@ export const Web3Provider = ({ children }) => {
     const handleChainChanged = (hexChainId) => {
       // Convert hex to number for comparison
       const chainIdNum = parseInt(hexChainId, 16);
+      setChainId(chainIdNum); // Update chainId state immediately
+      // If the new chain is not Vanguard, disconnect
       if (chainIdNum !== VANGUARD_CHAIN_ID_NUM) {
-        disconnectWallet();
+          console.log('Switched to wrong network, disconnecting...');
+          disconnectWallet();
+      } else {
+          // If switched to Vanguard, reconnect to update provider/signer
+          console.log('Switched to Vanguard network, reconnecting...');
+          connectWallet();
       }
-      window.location.reload();
     };
 
     if (window.ethereum) {
-      window.ethereum.on('accountsChanged', handleAccountsChanged);
-      window.ethereum.on('chainChanged', handleChainChanged);
-
+      // Initial check if already connected
       window.ethereum.request({ method: 'eth_accounts' })
         .then(accounts => {
           if (accounts.length > 0) {
-            connectWallet();
+            // If accounts are found, check network and connect
+            window.ethereum.request({ method: 'eth_chainId' })
+              .then(hexChainId => {
+                const currentChainId = parseInt(hexChainId, 16);
+                if (currentChainId === VANGUARD_CHAIN_ID_NUM) {
+                  connectWallet(); // Connect if already on Vanguard
+                } else {
+                   // Optionally, prompt to switch here or handle in connectWallet
+                   console.log('Wallet connected but on wrong network.');
+                   // The connectWallet function will handle the switch/add prompt when called by user action
+                }
+              })
+              .catch(console.error);
+          } else {
+              setIsConnected(false); // No accounts found
           }
         })
         .catch(console.error);
+
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+
     }
 
+    // Cleanup listeners
     return () => {
       if (window.ethereum) {
         window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
         window.ethereum.removeListener('chainChanged', handleChainChanged);
       }
     };
-  }, []);
+  }, []); // Empty dependency array means this effect runs once on mount
 
   return (
     <Web3Context.Provider
@@ -160,7 +190,8 @@ export const Web3Provider = ({ children }) => {
         isAuthorizedSigner,
         connectWallet,
         disconnectWallet,
-        checkSignerAuthorization
+        checkSignerAuthorization,
+        VANGUARD_CHAIN_ID_NUM // Export for external checks if needed
       }}
     >
       {children}

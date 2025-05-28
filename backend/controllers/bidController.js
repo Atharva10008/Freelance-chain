@@ -295,10 +295,16 @@ exports.getBidsForJob = async (req, res) => {
 // Update bid status
 exports.updateBidStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, contractId, transactionHash } = req.body;
+    const updateData = { status };
+    
+    // Add contract information if provided
+    if (contractId) updateData.contractId = contractId;
+    if (transactionHash) updateData.transactionHash = transactionHash;
+    
     const bid = await Bid.findByIdAndUpdate(
       req.params.id,
-      { status },
+      updateData,
       { new: true }
     ).populate('freelancerId', 'name email profilePicture');
 

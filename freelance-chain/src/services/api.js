@@ -350,6 +350,15 @@ export const jobService = {
   },
   saveJob: async (id) => api.post(`/jobs/${id}/save`),
   unsaveJob: async (id) => api.post(`/jobs/${id}/unsave`),
+  // Get job by ID
+  getJobById: async (id) => {
+    try {
+      const response = await api.get(`/jobs/${id}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error.message;
+    }
+  },
   // Get jobs posted by current user
   createJob: async (jobData) => {
     try {

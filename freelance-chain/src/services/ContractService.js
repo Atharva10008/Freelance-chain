@@ -1,6 +1,7 @@
 import { api } from './api';
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../../utils/contract';
+import { createContractOnChain } from './ContractOnChainService';
 
 // Remove old ABI and address
 // const JobContractABI = [ ... ];
@@ -20,7 +21,7 @@ const getAuthConfig = () => {
 };
 
 export const contractService = {
-  createContract: async (jobId, bidId, freelancerId, freelancerAddress, bidAmount, jobTitle, jobDescription, deadline, contractId, contractAddress, transactionHash) => {
+  createContract: async (jobId, bidId, freelancerId, freelancerAddress, bidAmount, jobTitle, jobDescription, deadline, provider, signer) => {
     try {
       console.log('Creating contract with data:', {
         jobId,
@@ -31,12 +32,28 @@ export const contractService = {
         jobTitle,
         jobDescription,
         deadline,
-        contractId,
-        contractAddress,
-        transactionHash
+        provider: !!provider,
+        signer: !!signer
       });
 
-      // Create contract in backend
+      if (!provider || !signer) {
+        throw new Error('Wallet not connected');
+      }
+
+      // First create contract on blockchain
+      const blockchainResult = await createContractOnChain({
+        freelancerAddress,
+        bidAmount,
+        deadline,
+        jobTitle,
+        jobDescription,
+        provider,
+        signer
+      });
+
+      console.log('Blockchain contract created:', blockchainResult);
+
+      // Then create contract in backend
       const response = await api.post('/contracts', {
         jobId, 
         bidId, 
@@ -46,9 +63,9 @@ export const contractService = {
         jobTitle, 
         jobDescription, 
         deadline,
-        contractId,
-        contractAddress,
-        transactionHash
+        contractId: blockchainResult.contractId,
+        contractAddress: CONTRACT_ADDRESS,
+        transactionHash: blockchainResult.txHash
       }, getAuthConfig());
 
       console.log('Contract creation response:', response.data);
@@ -85,6 +102,12 @@ export const contractService = {
   getContract: async (contractId) => {
     try {
       const response = await api.get(`/contracts/${contractId}`, getAuthConfig());
+      console.log('Response from backend /contracts/:id:', response.data);
+
+      if (!response.data.success) {
+        throw new Error(response.data.error || 'Failed to fetch contract');
+      }
+
       return response.data.data;
     } catch (error) {
       console.error('Get contract error:', error);
@@ -96,11 +119,11 @@ export const contractService = {
     }
   },
   
-  signContract: async (contractId) => {
+  signContract: async (contractId, signerAddress) => {
     try {
       const response = await api.post(
         `/contracts/${contractId}/sign`,
-        {},
+        { signerAddress },
         getAuthConfig()
       );
       return response.data.data;

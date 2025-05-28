@@ -1,31 +1,38 @@
 const { ethers } = require('ethers');
 require('dotenv').config();
 const { CONTRACT_ABI } = require('../config/contractABI');
-const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x03162D7C415dF0D30f546550Aa81f567a65a19A0';
+const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x960Ea62774d166FF796415451ca4410a3A8693eb';
+
+// Network configuration for Vanguard
+const vanguardNetwork = {
+    name: 'Vanguard',
+    chainId: 78600,
+    ensAddress: null
+};
 
 let provider;
-let signer;
 let contract;
+
+// Helper function to validate addresses
+const validateAddress = (address) => {
+    if (!ethers.utils.isAddress(address)) {
+        throw new Error(`Invalid address: ${address}`);
+    }
+    return ethers.utils.getAddress(address); // Normalize to checksum address
+};
 
 const initialize = async () => {
     try {
         // Initialize provider with explicit network configuration
-        provider = new ethers.providers.JsonRpcProvider(process.env.PROVIDER_URL || 'https://rpc-vanguard.vanarchain.com');
+        provider = new ethers.providers.JsonRpcProvider({
+            url: process.env.PROVIDER_URL || 'https://rpc-vanguard.vanarchain.com',
+            ...vanguardNetwork
+        });
         
-        // Wait for network to be ready
         await provider.ready;
         console.log('Provider initialized with network:', await provider.getNetwork());
         
-        // Initialize signer with private key
-        const privateKey = process.env.PRIVATE_KEY;
-        if (!privateKey) {
-            throw new Error('Private key not found in environment variables');
-        }
-        signer = new ethers.Wallet(privateKey, provider);
-        console.log('Signer initialized with address:', signer.address);
-        
-        // Initialize contract
-        contract = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signer);
+        contract = new ethers.Contract(JobContractAddress, CONTRACT_ABI, provider);
         console.log('Contract initialized at address:', JobContractAddress);
         
         return true;
@@ -35,157 +42,126 @@ const initialize = async () => {
     }
 };
 
-const createContract = async (contractData) => {
+const createContract = async (contractData, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
 
-        const { freelancerAddress, bidAmount, deadline, jobTitle, jobDescription } = contractData;
-        
-        console.log('--- Creating contract on blockchain ---');
-        console.log('freelancerAddress:', freelancerAddress);
-        console.log('bidAmount:', bidAmount);
-        console.log('deadline:', deadline);
-        console.log('jobTitle:', jobTitle);
-        console.log('jobDescription:', jobDescription);
-        if (signer && signer.address) {
-            console.log('sender (signer.address):', signer.address);
-        } else if (signer) {
-            try {
-                const address = await signer.getAddress();
-                console.log('sender (signer.getAddress()):', address);
-            } catch (e) {
-                console.log('Could not get signer address:', e);
-            }
-        } else {
-            console.log('No signer provided');
-        }
+        // Validate and normalize addresses
+        const freelancerAddress = validateAddress(contractData.freelancerAddress);
+        const signerAddress = validateAddress(await signer.getAddress());
 
-        try {
-            // Convert bidAmount to wei
-            const bidAmountWei = ethers.utils.parseEther(bidAmount.toString());
-            console.log('bidAmountWei:', bidAmountWei.toString());
+        const tx = await contract.connect(signer).createContract(
+            freelancerAddress,
+            ethers.utils.parseEther(contractData.bidAmount.toString()),
+            Math.floor(new Date(contractData.deadline).getTime() / 1000),
+            contractData.jobTitle,
+            contractData.jobDescription
+        );
 
-            // Convert deadline to Unix timestamp (seconds) and ensure it's at least 24 hours in the future
-            const currentTimestamp = Math.floor(Date.now() / 1000);
-            const minDeadline = currentTimestamp + (24 * 60 * 60); // 24 hours from now
-            const deadlineTimestamp = Math.max(minDeadline, Math.floor(new Date(deadline).getTime() / 1000));
-            console.log('currentTimestamp:', currentTimestamp);
-            console.log('minDeadline:', minDeadline);
-            console.log('deadlineTimestamp:', deadlineTimestamp);
+        const receipt = await tx.wait();
+        const event = receipt.events?.find(e => e.event === 'ContractCreated');
 
-            const tx = await contract.createContract(
-                freelancerAddress,
-                bidAmountWei,
-                deadlineTimestamp,
-                jobTitle,
-                jobDescription
-            );
-            console.log('Transaction sent:', tx.hash);
-            const receipt = await tx.wait();
-            console.log('Transaction confirmed:', receipt);
-            
-            // Get contract ID from event
-            const event = receipt.events.find(e => e.event === 'ContractCreated');
-            if (!event) {
-                throw new Error('ContractCreated event not found in transaction receipt');
-            }
-            
-            const contractId = event.args.contractId;
-            console.log('Contract created with ID:', contractId);
-            
-            return {
-                address: JobContractAddress,
-                contractId,
-                transactionHash: tx.hash
-            };
-        } catch (error) {
-            console.error('Error creating contract:', error);
-            throw error;
-        }
+        if (!event) throw new Error('ContractCreated event missing');
+
+        return {
+            address: JobContractAddress,
+            contractId: event.args.contractId.toString(),
+            transactionHash: tx.hash
+        };
     } catch (error) {
-        console.error('Error creating contract:', error);
-        throw error;
+        console.error('Create contract error:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
+        
+        // Enhanced error handling
+        let errorMessage = 'Contract creation failed';
+        if (error.code === 'UNSUPPORTED_OPERATION') {
+            errorMessage = 'Network operation not supported';
+        } else if (error.code === 'INVALID_ARGUMENT') {
+            errorMessage = 'Invalid address provided';
+        } else if (error.code === 'INSUFFICIENT_FUNDS') {
+            errorMessage = 'Insufficient funds for transaction';
+        }
+        throw new Error(`${errorMessage}: ${error.message}`);
     }
 };
 
-const getContractState = async (contractAddress, contractId) => {
+const getContractState = async (contractAddress, contractId, signer) => {
     try {
         if (!contract) {
             throw new Error('Contract not initialized. Call initialize() first.');
         }
 
-        // If contractAddress is provided, verify it matches our contract
-        if (contractAddress && contractAddress.toLowerCase() !== JobContractAddress.toLowerCase()) {
-            console.warn('[getContractState] Contract address mismatch:', contractAddress, 'expected:', JobContractAddress);
-            return null;
+        // If contractAddress is provided, use that address instead of the default one
+        let contractInstance;
+        if (contractAddress) {
+            console.log('[getContractState] Using provided contract address:', contractAddress);
+            contractInstance = new ethers.Contract(contractAddress, CONTRACT_ABI, signer || provider);
+        } else {
+            contractInstance = contract;
         }
 
         let id;
-        // Handle MongoDB ObjectId
         if (typeof contractId === 'string' && contractId.length === 24) {
             console.log('[getContractState] Converting MongoDB ObjectId to contract ID:', contractId);
             const Contract = require('../models/Contract');
             const contractDoc = await Contract.findById(contractId);
-            if (!contractDoc) {
-                console.warn('[getContractState] Contract not found in database:', contractId);
-                return null;
-            }
-            if (!contractDoc.contractId) {
-                console.warn('[getContractState] Contract document has no contractId field:', contractDoc);
-                return null;
-            }
+            if (!contractDoc) { throw new Error('Contract not found in database'); }
+            if (contractDoc.contractId === undefined || contractDoc.contractId === null) { throw new Error('Contract has no blockchain contract ID'); }
             id = contractDoc.contractId;
             console.log('[getContractState] Converted to contract ID:', id);
         } else {
-            // Try to parse as a number
             try {
                 id = parseInt(contractId, 10);
-                if (isNaN(id)) {
-                    console.warn('[getContractState] Invalid contract ID format:', contractId);
-                    return null;
-                }
-            } catch (e) {
-                console.warn('[getContractState] Error parsing contract ID:', e);
-                return null;
-            }
+                if (isNaN(id) || id < 0) { throw new Error('Invalid contract ID format or value'); }
+            } catch(e) { throw new Error('Invalid contract ID provided'); }
         }
 
-        // Validate id is a non-negative integer
-        if (!Number.isInteger(id) || id < 0) {
-            console.warn('[getContractState] Invalid contract ID value:', id);
-            return null;
-        }
+        console.log('[getContractState] Fetching contract with blockchain ID:', id);
 
-        console.log('[getContractState] Fetching contract with ID:', id);
         try {
-            const state = await contract.getContract(id);
-            if (!state) {
-                console.warn('[getContractState] No state returned for contract ID:', id);
-                return null;
-            }
+            const state = await contractInstance.getContract(id);
 
-            // Validate the returned state
-            if (!state.client || !state.freelancer) {
-                console.warn('[getContractState] Invalid state returned for contract ID:', id);
-                return null;
-            }
+            if (!state) { throw new Error('No state returned for contract ID'); }
+            if (!state.client || !state.freelancer) { throw new Error('Invalid state structure returned'); }
 
-            return {
+            const statusMap = ['Created', 'ClientSigned', 'FreelancerSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed'];
+            const readableStatus = statusMap[state.status] || 'Unknown';
+
+            const bidAmountEth = ethers.utils.formatEther(state.bidAmount);
+            const deadlineDate = new Date(state.deadline.toNumber() * 1000);
+
+            const blockchainState = {
                 client: state.client,
                 freelancer: state.freelancer,
-                bidAmount: ethers.utils.formatEther(state.bidAmount),
-                deadline: new Date(state.deadline.toNumber() * 1000),
+                bidAmount: bidAmountEth,
+                deadline: deadlineDate,
                 jobTitle: state.jobTitle,
                 jobDescription: state.jobDescription,
-                status: ['Created', 'ClientSigned', 'FreelancerSigned', 'WorkSubmitted', 'Completed', 'Disputed'][state.status],
+                status: readableStatus,
                 workSubmissionHash: state.workSubmissionHash,
-                fundsDeposited: ethers.utils.formatEther(state.fundsDeposited)
+                fundsDeposited: Boolean(state.fundsDeposited),
+                clientApproved: Boolean(state.clientApproved),
+                freelancerApproved: Boolean(state.freelancerApproved),
             };
+
+            console.log('Blockchain state object returned by contractUtils.getContractState (deep log):', JSON.stringify(blockchainState, null, 2));
+
+            return blockchainState;
+
         } catch (err) {
-            console.error('[getContractState] Error fetching from blockchain for id', id, err);
-            // If the error is a panic code 50 (array index out of bounds), return null
+            console.error('[getContractState] Error fetching from blockchain for id', id, {
+                error: err,
+                message: err.message,
+                data: err.data,
+                code: err.code,
+                stack: err.stack
+            });
             if (err.message && err.message.includes('panic code 50')) {
                 console.warn('[getContractState] Contract not found on blockchain (panic code 50)');
                 return null;
@@ -193,105 +169,156 @@ const getContractState = async (contractAddress, contractId) => {
             throw err;
         }
     } catch (error) {
-        console.error('[getContractState] Error:', error);
-        return null;
+        console.error('[getContractState] Error:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
+        throw error;
     }
 };
 
-const getContractIdFromMongoId = async (mongoId) => {
-    if (typeof mongoId === 'string' && mongoId.length === 24) {
-        const Contract = require('../models/Contract');
-        const contractDoc = await Contract.findById(mongoId);
-        if (!contractDoc) {
-            throw new Error('Contract not found in database');
-        }
-        return contractDoc.contractId;
-    }
-    return mongoId;
-};
-
-const signContract = async (contractAddress, contractId) => {
+const clientSignContract = async (contractId, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
-        // contractId should be a number
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer is required');
+        
+        const contractWithSigner = contract.connect(signer);
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
-        if (isNaN(id)) {
-            throw new Error('Invalid contractId for signContract');
-        }
-        // Call the signContract function on the contract
-        const tx = await contract.signContract(id);
+        if (isNaN(id)) throw new Error('Invalid contractId');
+        
+        const tx = await contractWithSigner.clientSignContract(id);
         await tx.wait();
         return true;
     } catch (error) {
-        console.error('Error signing contract:', error);
+        console.error('Error signing contract as client:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
         throw error;
     }
 };
 
-const depositFunds = async (contractId, amount) => {
+const freelancerSignContract = async (contractId, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
-
-        const id = await getContractIdFromMongoId(contractId);
-        const amountWei = ethers.utils.parseEther(amount.toString());
-        const tx = await contract.depositFunds(id, { value: amountWei });
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer is required');
+        
+        const contractWithSigner = contract.connect(signer);
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+        
+        const tx = await contractWithSigner.freelancerSignContract(id);
         await tx.wait();
         return true;
     } catch (error) {
-        console.error('Error depositing funds:', error);
+        console.error('Error signing contract as freelancer:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
         throw error;
     }
 };
 
-const submitWork = async (contractId, workHash) => {
+const depositFunds = async (contractId, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
 
-        const id = await getContractIdFromMongoId(contractId);
-        const tx = await contract.submitWork(id, workHash);
-        await tx.wait();
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        console.log('Depositing funds for contract ID:', id);
+
+        const tx = await contract.connect(signer).depositFunds(id);
+        const receipt = await tx.wait();
+        console.log('Funds deposited successfully:', receipt.transactionHash);
         return true;
     } catch (error) {
-        console.error('Error submitting work:', error);
+        console.error('Error depositing funds:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
         throw error;
     }
 };
 
-const approveWork = async (contractId) => {
+const submitWork = async (contractId, workHash, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
 
-        const id = await getContractIdFromMongoId(contractId);
-        const tx = await contract.approveWork(id);
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const tx = await contract.connect(signer).submitWork(id, workHash);
         await tx.wait();
         return true;
     } catch (error) {
-        console.error('Error approving work:', error);
+        console.error('Error submitting work:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
         throw error;
     }
 };
 
-const raiseDispute = async (contractId) => {
+const approveWork = async (contractId, signer) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
 
-        const id = await getContractIdFromMongoId(contractId);
-        const disputeFee = await contract.disputeFee();
-        const tx = await contract.raiseDispute(id, { value: disputeFee });
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const tx = await contract.connect(signer).approveWork(id);
         await tx.wait();
         return true;
     } catch (error) {
-        console.error('Error raising dispute:', error);
+        console.error('Error approving work:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
+        throw error;
+    }
+};
+
+const raiseDispute = async (contractId, signer) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const tx = await contract.connect(signer).raiseDispute(id);
+        await tx.wait();
+        return true;
+    } catch (error) {
+        console.error('Error raising dispute:', {
+            error,
+            message: error.message,
+            data: error.data,
+            code: error.code,
+            stack: error.stack
+        });
         throw error;
     }
 };
@@ -300,7 +327,8 @@ module.exports = {
     initialize,
     createContract,
     getContractState,
-    signContract,
+    clientSignContract,
+    freelancerSignContract,
     depositFunds,
     submitWork,
     approveWork,

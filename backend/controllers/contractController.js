@@ -37,36 +37,20 @@ exports.createContract = async (req, res) => {
             }
         }
 
-        const contractData = {
-            freelancerAddress: req.body.freelancerAddress,
-            bidAmount: req.body.bidAmount,
-            deadline: req.body.deadline,
-            jobTitle: req.body.jobTitle,
-            jobDescription: req.body.jobDescription
-        };
-
-        // Create contract on blockchain
-        console.log('Attempting to create contract with data:', contractData);
-        const result = await contractUtils.createContract(contractData);
-        
-        if (!result || !result.contractId) {
-            throw new Error('Failed to get contract ID from blockchain');
-        }
-
-        // Create contract in database
+        // Create contract in database first
         try {
             console.log('Preparing contract data for database save:', {
                 job: req.body.jobId,
                 bid: req.body.bidId,
                 client: req.user._id,
                 freelancer: req.body.freelancerId,
-                contractAddress: result.address,
-                contractId: result.contractId.toNumber(), // Convert BigNumber to number
+                contractAddress: req.body.contractAddress,
+                contractId: req.body.contractId,
                 bidAmount: req.body.bidAmount,
                 jobTitle: req.body.jobTitle,
                 jobDescription: req.body.jobDescription,
                 deadline: req.body.deadline,
-                transactionHash: result.transactionHash
+                transactionHash: req.body.transactionHash
             });
 
             const contract = new Contract({
@@ -74,13 +58,13 @@ exports.createContract = async (req, res) => {
                 bid: req.body.bidId,
                 client: req.user._id,
                 freelancer: req.body.freelancerId,
-                contractAddress: result.address,
-                contractId: result.contractId.toNumber(), // Convert BigNumber to number
+                contractAddress: req.body.contractAddress,
+                contractId: req.body.contractId,
                 bidAmount: req.body.bidAmount,
                 jobTitle: req.body.jobTitle,
                 jobDescription: req.body.jobDescription,
                 deadline: req.body.deadline,
-                transactionHash: result.transactionHash,
+                transactionHash: req.body.transactionHash,
                 status: 'created'
             });
 
@@ -140,6 +124,7 @@ exports.getUserContracts = async (req, res) => {
                         console.warn('Skipping contract with null blockchain state:', contract._id);
                         return null;
                     }
+
                     // Map blockchain status to DB status
                     const dbStatus = blockchainToDbStatus[blockchainState.status];
                     if (dbStatus && dbStatus !== contract.status) {
@@ -147,9 +132,25 @@ exports.getUserContracts = async (req, res) => {
                         await Contract.findByIdAndUpdate(contract._id, { status: dbStatus });
                         contract.status = dbStatus;
                     }
+
+                    // Update both signed flags and approved flags
+                    if (contract.clientSigned !== blockchainState.clientApproved || contract.freelancerSigned !== blockchainState.freelancerApproved) {
+                        await Contract.findByIdAndUpdate(contract._id, {
+                            clientSigned: blockchainState.clientApproved,
+                            freelancerSigned: blockchainState.freelancerApproved,
+                            updatedAt: new Date()
+                        });
+                        contract.clientSigned = blockchainState.clientApproved;
+                        contract.freelancerSigned = blockchainState.freelancerApproved;
+                    }
+
                     return {
                         ...contract,
-                        blockchainState
+                        blockchainState: blockchainState,
+                        clientApproved: blockchainState.clientApproved,
+                        freelancerApproved: blockchainState.freelancerApproved,
+                        clientSigned: blockchainState.clientApproved, // Ensure these are in sync
+                        freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
                     };
                 } catch (err) {
                     console.error(`Error fetching blockchain state for contract ${contract._id}:`, err.message);
@@ -191,22 +192,38 @@ exports.getContract = async (req, res) => {
         }
 
         try {
+            // Add a small delay before fetching blockchain state
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Add a 3-second delay
+
             // Get the blockchain state of the contract
             const blockchainState = await contractUtils.getContractState(
                 contract.contractAddress,
                 contract.contractId
             );
+
             // Map blockchain status to DB status
             const dbStatus = blockchainToDbStatus[blockchainState.status];
             if (dbStatus && dbStatus !== contract.status) {
                 contract.status = dbStatus;
-                await contract.save();
             }
+
+            // Update both signed flags and approved flags
+            contract.clientSigned = blockchainState.clientApproved;
+            contract.freelancerSigned = blockchainState.freelancerApproved;
+            contract.updatedAt = new Date();
+            await contract.save();
+
             // Combine database and blockchain data
             const contractData = {
                 ...contract.toObject(),
-                blockchainState
+                blockchainState: blockchainState,
+                clientApproved: blockchainState.clientApproved,
+                freelancerApproved: blockchainState.freelancerApproved,
+                clientSigned: blockchainState.clientApproved, // Ensure these are in sync
+                freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
             };
+
+            console.log('Data being sent from backend /contracts/:id (deep log):', JSON.stringify(contractData, null, 2));
 
             res.status(200).json({
                 success: true,
@@ -253,14 +270,65 @@ exports.signContract = async (req, res) => {
         }
 
         // Sign the contract on the blockchain
-        await contractUtils.signContract(contract.contractAddress, contractId);
+        await contractUtils.clientSignContract(contractId, req.signer);
+        console.log('Contract signed on blockchain as client for ID:', contractId);
 
-        // ... rest of the function remains the same ...
+        // After successful on-chain signing, refetch the latest state from the blockchain
+        const blockchainState = await contractUtils.getContractState(
+            contract.contractAddress,
+            contractId
+        );
+        console.log('Blockchain state fetched in backend after client sign:', JSON.stringify(blockchainState, null, 2));
+
+        if (!blockchainState) {
+            console.warn('Blockchain state is null after signing.');
+            return res.status(200).json({
+                success: true,
+                data: contract.toObject(),
+                warning: 'Blockchain state could not be refetched after signing.'
+            });
+        }
+
+        // Update database flags based on the latest blockchain state
+        const dbStatus = blockchainToDbStatus[blockchainState.status];
+        if (dbStatus && dbStatus !== contract.status) {
+            contract.status = dbStatus;
+        }
+
+        // Update both signed flags and approved flags
+        contract.clientSigned = blockchainState.clientApproved;
+        contract.freelancerSigned = blockchainState.freelancerApproved;
+        contract.updatedAt = new Date();
+        await contract.save();
+        console.log('Database contract updated after signing.');
+
+        // Combine database and refetched blockchain data
+        const updatedContractData = {
+            ...contract.toObject(),
+            blockchainState: blockchainState,
+            clientApproved: blockchainState.clientApproved,
+            freelancerApproved: blockchainState.freelancerApproved,
+            clientSigned: blockchainState.clientApproved, // Ensure these are in sync
+            freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
+        };
+
+        console.log('Updated contract data prepared by backend after client sign:', JSON.stringify(updatedContractData, null, 2));
+
+        res.status(200).json({
+            success: true,
+            data: updatedContractData
+        });
     } catch (err) {
-        console.error('Error signing contract:', err);
+        console.error('Error in signContract endpoint:', err);
+        let errorMessage = 'Failed to sign contract';
+        if (err.message) {
+            errorMessage += `: ${err.message}`;
+        } else if (err.reason) {
+            errorMessage += `: ${err.reason}`;
+        }
         res.status(500).json({
             success: false,
-            error: err.message
+            error: errorMessage
         });
     }
 };

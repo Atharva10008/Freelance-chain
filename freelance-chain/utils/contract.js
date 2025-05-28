@@ -1,4 +1,4 @@
-export const CONTRACT_ADDRESS = "0x03162D7C415dF0D30f546550Aa81f567a65a19A0";
+export const CONTRACT_ADDRESS = "0x2528C34B1aC2eeC85069A3aAd0789d833C7b68eD";
 
 export const CONTRACT_ABI = [
   {
@@ -27,6 +27,18 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "client",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "freelancer",
+        "type": "address"
       }
     ],
     "name": "ContractCreated",
@@ -40,21 +52,35 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "raisedBy",
-        "type": "address"
-      },
+      }
+    ],
+    "name": "ClientSigned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "fee",
+        "name": "contractId",
         "type": "uint256"
       }
     ],
-    "name": "DisputeRaised",
+    "name": "FreelancerSigned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "ContractFullySigned",
     "type": "event"
   },
   {
@@ -74,6 +100,38 @@ export const CONTRACT_ABI = [
       }
     ],
     "name": "FundsDeposited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "workHash",
+        "type": "string"
+      }
+    ],
+    "name": "WorkSubmitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "WorkApproved",
     "type": "event"
   },
   {
@@ -138,71 +196,21 @@ export const CONTRACT_ABI = [
       {
         "indexed": false,
         "internalType": "address",
-        "name": "signer",
+        "name": "raisedBy",
         "type": "address"
-      }
-    ],
-    "name": "Signed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "contractId",
-        "type": "uint256"
       },
       {
         "indexed": false,
-        "internalType": "address",
-        "name": "approver",
-        "type": "address"
-      }
-    ],
-    "name": "WorkApproved",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
         "internalType": "uint256",
-        "name": "contractId",
+        "name": "fee",
         "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "workHash",
-        "type": "string"
       }
     ],
-    "name": "WorkSubmitted",
+    "name": "DisputeRaised",
     "type": "event"
   },
   {
     "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "approveWork",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "_client",
-        "type": "address"
-      },
       {
         "internalType": "address",
         "name": "_freelancer",
@@ -227,16 +235,6 @@ export const CONTRACT_ABI = [
         "internalType": "string",
         "name": "_jobDescription",
         "type": "string"
-      },
-      {
-        "internalType": "address",
-        "name": "_clientSigner",
-        "type": "address"
-      },
-      {
-        "internalType": "address",
-        "name": "_freelancerSigner",
-        "type": "address"
       }
     ],
     "name": "createContract",
@@ -267,11 +265,130 @@ export const CONTRACT_ABI = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "",
+        "name": "_contractId",
         "type": "uint256"
       }
     ],
-    "name": "contracts",
+    "name": "clientSignContract",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "freelancerSignContract",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_workHash",
+        "type": "string"
+      }
+    ],
+    "name": "submitWork",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "approveWork",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "raiseDispute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "clientShare",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "freelancerShare",
+        "type": "uint256"
+      }
+    ],
+    "name": "resolveDispute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "requestRefund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_newFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "setDisputeFee",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getContract",
     "outputs": [
       {
         "internalType": "address",
@@ -309,6 +426,16 @@ export const CONTRACT_ABI = [
         "type": "uint8"
       },
       {
+        "internalType": "string",
+        "name": "workSubmissionHash",
+        "type": "string"
+      },
+      {
+        "internalType": "bool",
+        "name": "fundsDeposited",
+        "type": "bool"
+      },
+      {
         "internalType": "bool",
         "name": "clientApproved",
         "type": "bool"
@@ -317,15 +444,18 @@ export const CONTRACT_ABI = [
         "internalType": "bool",
         "name": "freelancerApproved",
         "type": "bool"
-      },
-      {
-        "internalType": "string",
-        "name": "workSubmissionHash",
-        "type": "string"
-      },
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getContractCount",
+    "outputs": [
       {
         "internalType": "uint256",
-        "name": "fundsDeposited",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -340,27 +470,35 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "signContract",
+    "name": "isContractFullySigned",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdrawStuckFunds",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "tokenAddress",
+    "outputs": [
       {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "_workHash",
-        "type": "string"
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
-    "name": "submitWork",
-    "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
     "type": "function"
   }
 ];
