@@ -258,36 +258,21 @@ exports.submitBid = async (req, res) => {
 exports.getBidsForJob = async (req, res) => {
   try {
     const { jobId } = req.params;
-
-    if (!jobId) {
-      return res.status(400).json({
-        success: false,
-        message: "Job ID is required"
-      });
-    }
-
-    const job = await Job.findById(jobId);
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: "Job not found"
-      });
-    }
-
+    
     const bids = await Bid.find({ jobId })
-      .populate('freelancerId', 'username email walletAddress profilePicture name')
+      .populate('freelancerId', 'name profilePicture')
+      .populate('jobId', 'title description')
       .sort({ createdAt: -1 });
-
-    res.status(200).json({
+    
+    res.json({
       success: true,
       data: bids
     });
-
   } catch (error) {
-    console.error("Error fetching bids:", error);
+    console.error('Error fetching bids:', error);
     res.status(500).json({
       success: false,
-      message: "Server error while fetching bids"
+      error: error.message
     });
   }
 };

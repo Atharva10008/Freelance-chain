@@ -129,28 +129,71 @@ exports.getUserContracts = async (req, res) => {
                     const dbStatus = blockchainToDbStatus[blockchainState.status];
                     if (dbStatus && dbStatus !== contract.status) {
                         // Update status in DB (need to use findByIdAndUpdate since contract is lean)
-                        await Contract.findByIdAndUpdate(contract._id, { status: dbStatus });
-                        contract.status = dbStatus;
+                        // Use $set for explicit update fields
+                        await Contract.findByIdAndUpdate(contract._id, { $set: { status: dbStatus } });
+                        contract.status = dbStatus; // Update lean object locally
                     }
 
-                    // Update both signed flags and approved flags
-                    if (contract.clientSigned !== blockchainState.clientApproved || contract.freelancerSigned !== blockchainState.freelancerApproved) {
-                        await Contract.findByIdAndUpdate(contract._id, {
-                            clientSigned: blockchainState.clientApproved,
-                            freelancerSigned: blockchainState.freelancerApproved,
-                            updatedAt: new Date()
-                        });
-                        contract.clientSigned = blockchainState.clientApproved;
-                        contract.freelancerSigned = blockchainState.freelancerApproved;
+                    // Determine signed/approved states directly from the blockchain status value
+                    const isClientCurrentlySigned = blockchainState.status === 'ClientSigned' || blockchainState.status === 'BothSigned';
+                    const isFreelancerCurrentlySigned = blockchainState.status === 'FreelancerSigned' || blockchainState.status === 'BothSigned';
+
+                    // Update signed and approved flags with retry logic - Always update with $set
+                    // Set flags to true if the status indicates they have signed. Once true, they remain true.
+                    const currentContract = await Contract.findById(contract._id);
+                    const finalClientSigned = currentContract.clientSigned || isClientCurrentlySigned;
+                    const finalFreelancerSigned = currentContract.freelancerSigned || isFreelancerCurrentlySigned;
+                    const finalClientApproved = currentContract.clientApproved || isClientCurrentlySigned;
+                    const finalFreelancerApproved = currentContract.freelancerApproved || isFreelancerCurrentlySigned;
+
+                    const MAX_UPDATE_RETRIES = 3;
+                    const UPDATE_RETRY_DELAY_MS = 500;
+
+                    for (let attempt = 0; attempt < MAX_UPDATE_RETRIES; attempt++) {
+                        try {
+                            const updatedDoc = await Contract.findByIdAndUpdate(contract._id, {
+                                $set: {
+                                    clientSigned: finalClientSigned,
+                                    freelancerSigned: finalFreelancerSigned,
+                                    clientApproved: finalClientApproved,
+                                    freelancerApproved: finalFreelancerApproved,
+                                    updatedAt: new Date()
+                                }
+                            }, { new: true }).lean(); // Use {new: true} and .lean() to get the updated document
+
+                            // Update the lean contract object with confirmed DB values
+                            if(updatedDoc) {
+                                contract.clientSigned = updatedDoc.clientSigned;
+                                contract.freelancerSigned = updatedDoc.freelancerSigned;
+                                contract.clientApproved = updatedDoc.clientApproved;
+                                contract.freelancerApproved = updatedDoc.freelancerApproved;
+                                // No need to update status here, it's handled separately above if changed
+                            } else {
+                                console.warn(`[getUserContracts] findByIdAndUpdate returned null for contract ${contract._id}`);
+                            }
+
+                            console.log(`[getUserContracts] Successfully updated DB for contract ${contract._id} on attempt ${attempt + 1}. Final flags: clientSigned=${finalClientSigned}, freelancerSigned=${finalFreelancerSigned}, clientApproved=${finalClientApproved}, freelancerApproved=${finalFreelancerApproved}`);
+                            break; // Exit retry loop on success
+                        } catch (err) {
+                            console.error(`[getUserContracts] Attempt ${attempt + 1} failed for contract update ${contract._id}:`, err);
+                            if (attempt < MAX_UPDATE_RETRIES - 1) {
+                                await new Promise(res => setTimeout(res, UPDATE_RETRY_DELAY_MS));
+                            } else {
+                                console.error(`[getUserContracts] Failed to update DB for contract ${contract._id} after ${MAX_UPDATE_RETRIES} attempts.`);
+                                // Optionally throw or handle final failure
+                                throw new Error(`Failed to update contract ${contract._id} in DB.`);
+                            }
+                        }
                     }
 
                     return {
                         ...contract,
-                        blockchainState: blockchainState,
-                        clientApproved: blockchainState.clientApproved,
-                        freelancerApproved: blockchainState.freelancerApproved,
-                        clientSigned: blockchainState.clientApproved, // Ensure these are in sync
-                        freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
+                        // Ensure the returned object reflects the latest DB state after update
+                        clientApproved: contract.clientApproved,
+                        freelancerApproved: contract.freelancerApproved,
+                        clientSigned: contract.clientSigned,
+                        freelancerSigned: contract.freelancerSigned,
+                        blockchainState: blockchainState // Include blockchainState as extra info
                     };
                 } catch (err) {
                     console.error(`Error fetching blockchain state for contract ${contract._id}:`, err.message);
@@ -260,6 +303,12 @@ exports.signContract = async (req, res) => {
             });
         }
 
+        console.log('Contract before signing:', {
+            contractId: contract.contractId,
+            clientApproved: contract.clientApproved,
+            status: contract.status
+        });
+
         // Convert contract ID to number for blockchain
         const contractId = parseInt(contract.contractId);
         if (isNaN(contractId)) {
@@ -270,15 +319,26 @@ exports.signContract = async (req, res) => {
         }
 
         // Sign the contract on the blockchain
-        await contractUtils.clientSignContract(contractId, req.signer);
-        console.log('Contract signed on blockchain as client for ID:', contractId);
+        const signResult = await contractUtils.clientSignContract(contractId, req.signer);
+        console.log('Contract signed on blockchain:', {
+            contractId,
+            transactionHash: signResult.transactionHash,
+            blockNumber: signResult.blockNumber
+        });
 
         // After successful on-chain signing, refetch the latest state from the blockchain
         const blockchainState = await contractUtils.getContractState(
             contract.contractAddress,
-            contractId
+            contractId,
+            req.signer,
+            signResult.transactionHash
         );
-        console.log('Blockchain state fetched in backend after client sign:', JSON.stringify(blockchainState, null, 2));
+        console.log('Blockchain state after signing:', {
+            contractId,
+            clientApproved: blockchainState.clientApproved,
+            status: blockchainState.status,
+            fundsDeposited: blockchainState.fundsDeposited
+        });
 
         if (!blockchainState) {
             console.warn('Blockchain state is null after signing.');
@@ -289,30 +349,61 @@ exports.signContract = async (req, res) => {
             });
         }
 
-        // Update database flags based on the latest blockchain state
+        // Map blockchain status to DB status
         const dbStatus = blockchainToDbStatus[blockchainState.status];
-        if (dbStatus && dbStatus !== contract.status) {
-            contract.status = dbStatus;
-        }
 
-        // Update both signed flags and approved flags
-        contract.clientSigned = blockchainState.clientApproved;
-        contract.freelancerSigned = blockchainState.freelancerApproved;
-        contract.updatedAt = new Date();
-        await contract.save();
-        console.log('Database contract updated after signing.');
+        // Determine signed/approved states from the *processed* blockchainState (derived from status in contractUtils)
+        const isClientSigned = blockchainState.clientApproved;
+        const isFreelancerSigned = blockchainState.freelancerApproved;
+
+        // ✅ Always explicitly update with $set
+        await Contract.findByIdAndUpdate(contract._id, {
+            $set: {
+                status: dbStatus, // Update status based on blockchain
+                clientSigned: isClientSigned,
+                freelancerSigned: isFreelancerSigned,
+                clientApproved: isClientSigned, // Sync approved with signed based on this flow
+                freelancerApproved: isFreelancerSigned, // Sync approved with signed based on this flow
+                updatedAt: new Date()
+            }
+        });
+
+        // ✅ Post-save check
+        const updated = await Contract.findById(contract._id).lean();
+        console.log('Post-save verification:', {
+            contractId: contractId,
+            clientSigned: updated.clientSigned,
+            freelancerSigned: updated.freelancerSigned
+        });
+
+        console.log('Database contract updated:', {
+            contractId: contract.contractId,
+            status: updated.status, // Use status from the updated document
+            clientSigned: updated.clientSigned,
+            freelancerSigned: updated.freelancerSigned
+        });
 
         // Combine database and refetched blockchain data
         const updatedContractData = {
             ...contract.toObject(),
             blockchainState: blockchainState,
-            clientApproved: blockchainState.clientApproved,
-            freelancerApproved: blockchainState.freelancerApproved,
-            clientSigned: blockchainState.clientApproved, // Ensure these are in sync
-            freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
+            clientApproved: isClientSigned,
+            freelancerApproved: isFreelancerSigned,
+            clientSigned: isClientSigned,
+            freelancerSigned: isFreelancerSigned
         };
 
-        console.log('Updated contract data prepared by backend after client sign:', JSON.stringify(updatedContractData, null, 2));
+        console.log('Final contract data:', {
+            contractId: contract.contractId,
+            status: updatedContractData.status,
+            clientApproved: updatedContractData.clientApproved,
+            freelancerApproved: updatedContractData.freelancerApproved,
+            blockchainState: {
+                status: updatedContractData.blockchainState.status,
+                clientApproved: updatedContractData.blockchainState.clientApproved,
+                freelancerApproved: updatedContractData.blockchainState.freelancerApproved
+            }
+        });
 
         res.status(200).json({
             success: true,

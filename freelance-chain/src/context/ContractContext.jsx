@@ -22,48 +22,55 @@ export const ContractProvider = ({ children }) => {
 
   // Helper function to merge blockchain state with contract data
   const mergeBlockchainState = useCallback((contract) => {
-    if (!contract) return null;
+    if (!contract || !contract.blockchainState) return contract;
     
-    // If we have blockchain data, merge it with the main contract
-    if (contract.blockchainState) {
-      // Create a new object with the merged state
-      const mergedContract = {
-        ...contract,
-        // Use blockchain state as source of truth for approval flags
-        clientApproved: Boolean(contract.blockchainState.clientApproved),
-        freelancerApproved: Boolean(contract.blockchainState.freelancerApproved),
-        // Use blockchain status if available, otherwise fall back to contract status
-        status: contract.blockchainState.status || contract.status,
-        // Preserve the original blockchain state
-        blockchainState: {
-          ...contract.blockchainState,
-          // Ensure boolean values for approval flags
-          clientApproved: Boolean(contract.blockchainState.clientApproved),
-          freelancerApproved: Boolean(contract.blockchainState.freelancerApproved)
-        }
-      };
+    // Create a new object with the merged state
+    const mergedContract = {
+      ...contract,
+      // Directly use the backend-derived flags
+      clientApproved: contract.blockchainState.clientApproved,
+      freelancerApproved: contract.blockchainState.freelancerApproved,
+      // Use blockchain status as source of truth
+      status: contract.blockchainState.status,
+      // Preserve the original blockchain state
+      blockchainState: contract.blockchainState
+    };
 
-      console.log('Merging contract state:', {
-        original: {
-          clientApproved: contract.clientApproved,
-          freelancerApproved: contract.freelancerApproved,
-          status: contract.status
-        },
-        blockchain: {
-          clientApproved: contract.blockchainState.clientApproved,
-          freelancerApproved: contract.blockchainState.freelancerApproved,
-          status: contract.blockchainState.status
-        },
-        merged: {
-          clientApproved: mergedContract.clientApproved,
-          freelancerApproved: mergedContract.freelancerApproved,
-          status: mergedContract.status
-        }
-      });
+    console.log('Merged contract state:', {
+      contractId: contract._id,
+      original: {
+        clientApproved: contract.clientApproved,
+        freelancerApproved: contract.freelancerApproved,
+        status: contract.status
+      },
+      blockchain: {
+        clientApproved: contract.blockchainState.clientApproved,
+        freelancerApproved: contract.blockchainState.freelancerApproved,
+        status: contract.blockchainState.status
+      },
+      merged: {
+        clientApproved: mergedContract.clientApproved,
+        freelancerApproved: mergedContract.freelancerApproved,
+        status: mergedContract.status
+      }
+    });
 
-      return mergedContract;
-    }
-    return contract;
+    return mergedContract;
+  }, []);
+
+  // Helper function to update contracts state with deep equality check
+  const updateContractsState = useCallback((newContract) => {
+    setContracts(prevContracts => {
+      const updated = prevContracts.map(c => 
+        c._id === newContract._id ? { ...newContract } : { ...c }
+      );
+      
+      // Deep equality check to prevent unnecessary re-renders
+      if (JSON.stringify(updated) === JSON.stringify(prevContracts)) {
+        return prevContracts;
+      }
+      return updated;
+    });
   }, []);
 
   const fetchContracts = useCallback(async (showToast = true) => {
@@ -107,7 +114,6 @@ export const ContractProvider = ({ children }) => {
       console.log('Fetching contract:', contractId);
       const response = await contractService.getContract(contractId);
       console.log('Contract response from backend:', response);
-      console.log('Data received by ContractContext.getContract (deep log):', JSON.stringify(response, null, 2));
 
       if (!response) {
         console.warn('No response from getContract for ID:', contractId);
@@ -119,16 +125,7 @@ export const ContractProvider = ({ children }) => {
       console.log('Merged contract with blockchain state:', mergedContract);
 
       // Update the contract in the local state
-      setContracts(prevContracts => {
-        const updatedContracts = prevContracts.map(c => 
-          c._id === contractId ? mergedContract : c
-        );
-        if (!prevContracts.find(c => c._id === contractId)) {
-          updatedContracts.push(mergedContract);
-        }
-        console.log('Updated contracts state:', updatedContracts);
-        return updatedContracts;
-      });
+      updateContractsState(mergedContract);
       
       return mergedContract;
     } catch (error) {
@@ -136,12 +133,22 @@ export const ContractProvider = ({ children }) => {
       toast.error('Failed to fetch contract details: ' + error.message);
       throw error;
     }
-  }, [mergeBlockchainState]);
+  }, [mergeBlockchainState, updateContractsState]);
 
   const signContract = async (contractId, signerAddress) => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Optimistic update
+      const optimisticContract = contracts.find(c => c._id === contractId);
+      if (optimisticContract) {
+        updateContractsState({
+          ...optimisticContract,
+          clientApproved: true,
+          status: 'ClientSigned'
+        });
+      }
       
       console.log('Signing contract:', contractId, 'with address:', signerAddress);
       const result = await contractService.signContract(contractId, signerAddress);
@@ -152,30 +159,23 @@ export const ContractProvider = ({ children }) => {
       console.log('Merged contract after signing:', mergedContract);
 
       // Update the contract in the list with the merged data
-      setContracts(prevContracts => {
-        const newContracts = prevContracts.map(c =>
-          c._id === contractId ? mergedContract : c
-        );
-        // If the contract wasn't in the list initially, add it
-        if (!newContracts.find(c => c._id === contractId)) {
-          newContracts.push(mergedContract);
-        }
-        console.log('Updated contracts after signing:', newContracts);
-        // Log the specific contract object after updating the context state
-        const updatedContractInContext = newContracts.find(c => c._id === contractId);
-        console.log('Specific contract object in context after setContracts:', updatedContractInContext);
-        return newContracts;
-      });
+      updateContractsState(mergedContract);
 
       toast.success('Contract signed successfully');
       return mergedContract;
     } catch (err) {
       console.error('Sign contract error:', err);
+      // Revert optimistic update on error
+      const originalContract = contracts.find(c => c._id === contractId);
+      if (originalContract) {
+        updateContractsState({
+          ...originalContract,
+          clientApproved: false,
+          status: 'Draft'
+        });
+      }
       if (err.response?.status === 401) {
-        console.log('Unauthorized, redirecting to login');
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('user');
-        navigate('/signin');
+        handleAuthError();
       }
       setError(err.message);
       toast.error('Failed to sign contract: ' + err.message);
@@ -196,11 +196,7 @@ export const ContractProvider = ({ children }) => {
       const mergedContract = mergeBlockchainState(response);
       
       // Update the contract in the list with new state
-      setContracts(prevContracts => {
-        return prevContracts.map(c => 
-          c._id === contractId ? mergedContract : c
-        );
-      });
+      updateContractsState(mergedContract);
       
       toast.success('Funds deposited successfully');
       return mergedContract;
@@ -212,7 +208,7 @@ export const ContractProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [mergeBlockchainState]);
+  }, [mergeBlockchainState, updateContractsState]);
 
   // Initial fetch of contracts
   useEffect(() => {

@@ -253,9 +253,23 @@ const ContractView = () => {
         );
         console.log('Sign transaction sent:', signTx.hash);
         
-        console.log('Waiting for sign confirmation...');
+        console.log('Waiting for clientSignContract confirmation...');
         const signReceipt = await signTx.wait();
-        console.log('Sign confirmed:', signReceipt);
+        console.log('ClientSignContract confirmed:', signReceipt);
+
+        if (signReceipt.status === 1) {
+          console.log('ClientSignContract transaction was successful on chain.');
+
+          fetchContracts(); // Refresh the contract list to get the updated state
+
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Add a 2-second delay
+
+          toast.success('Contract signed by client successfully!');
+
+        } else {
+          console.error('ClientSignContract transaction failed on chain.', signReceipt);
+          throw new Error('ClientSignContract transaction failed.');
+        }
 
         const finalContractData = await contractInstance.getContract(contract.contractId);
         console.log('Final contract state after signing:', finalContractData);
@@ -269,8 +283,6 @@ const ContractView = () => {
         
         // Force a refetch of all contracts to ensure UI is updated
         await fetchContracts(false);
-
-        toast.success('Contract signed successfully!');
 
       } catch (err) {
         console.error('Signing failed:', err);

@@ -59,7 +59,6 @@ const MyJobs = () => {
       }
 
       const currentAddress = await signer.getAddress();
-      // Assuming bid.freelancerAddress is available and correct
       if (currentAddress.toLowerCase() === bid.freelancerAddress?.toLowerCase()) {
         throw new Error("Cannot accept your own bid");
       }
@@ -71,7 +70,7 @@ const MyJobs = () => {
         freelancerAddress: bid.freelancerAddress,
         bidAmount: bid.bidAmount,
         deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-        jobTitle: bid.job?.title || bid.jobTitle || "Job Contract",
+        jobTitle: bid.job?.title || bid.jobTitle || bid.jobId?.title || "Job Contract",
         jobDescription: bid.job?.description || bid.proposal || "Job Description",
         provider: provider,
         signer: signer

@@ -186,6 +186,7 @@ contract FreelancePlatform {
         require(!contractData.clientSigned, "Client already signed");
 
         contractData.clientSigned = true;
+        contractData.clientApproved = true;
         contractData.status = ContractStatus.ClientSigned;
 
         emit ContractSigned(contractId, msg.sender);
