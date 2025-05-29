@@ -19,7 +19,8 @@ const blockchainToDbStatus = {
     FreelancerSigned: 'freelancer_signed',
     WorkSubmitted: 'work_submitted',
     Completed: 'completed',
-    Disputed: 'disputed'
+    Disputed: 'disputed',
+    BothSigned: 'both_signed'
 };
 
 exports.createContract = async (req, res) => {

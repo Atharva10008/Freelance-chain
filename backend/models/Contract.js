@@ -56,7 +56,8 @@ const contractSchema = new mongoose.Schema({
             'work_submitted',
             'work_approved',
             'completed',
-            'disputed'
+            'disputed',
+            'both_signed'
         ],
         default: 'created'
     },

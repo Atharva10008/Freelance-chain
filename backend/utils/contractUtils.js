@@ -181,7 +181,9 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
             throw new Error(`Failed to fetch contract state for ID ${id} after multiple retries.`);
         }
 
-        const statusMap = ['Created', 'ClientSigned', 'FreelancerSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed'];
+        // Ensure statusMap includes all possible statuses from the smart contract enum
+        // enum Status { Created, ClientSigned, FreelancerSigned, BothSigned, WorkSubmitted, Completed, Disputed, Funded }
+        const statusMap = ['Created', 'ClientSigned', 'FreelancerSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Funded'];
         const readableStatus = statusMap[state.status] || 'Unknown';
         const bidAmountEth = ethers.utils.formatEther(state.bidAmount);
         const deadlineDate = new Date(state.deadline.toNumber() * 1000);
@@ -193,8 +195,10 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
         });
 
         // Determine approval states based on contract status value
-        const isClientApproved = state.status === 1 || state.status === 3; // Status 1 = ClientSigned, 3 = BothSigned
-        const isFreelancerApproved = state.status === 2 || state.status === 3; // Status 2 = FreelancerSigned, 3 = BothSigned
+        // Status 1 = ClientSigned, Status 3 = BothSigned
+        const isClientApproved = state.status === 1 || state.status === 3;
+        // Status 2 = FreelancerSigned, Status 3 = BothSigned
+        const isFreelancerApproved = state.status === 2 || state.status === 3;
 
         const blockchainState = {
             client: state.client,
@@ -327,17 +331,20 @@ const submitWork = async (contractId, workHash, signer) => {
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
+        console.log('Submitting work for contract ID:', id);
         const tx = await contract.connect(signer).submitWork(id, workHash);
-        await tx.wait();
-        return true;
+        
+        console.log('Waiting for transaction confirmation...');
+        const receipt = await tx.wait();
+        
+        if (receipt.status === 1) {
+            console.log('Work submitted successfully:', receipt.transactionHash);
+            return true;
+        } else {
+            throw new Error('Transaction failed');
+        }
     } catch (error) {
-        console.error('Error submitting work:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('Error submitting work:', error);
         throw error;
     }
 };
@@ -350,17 +357,20 @@ const approveWork = async (contractId, signer) => {
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
+        console.log('Approving work for contract ID:', id);
         const tx = await contract.connect(signer).approveWork(id);
-        await tx.wait();
-        return true;
+        
+        console.log('Waiting for transaction confirmation...');
+        const receipt = await tx.wait();
+        
+        if (receipt.status === 1) {
+            console.log('Work approved successfully:', receipt.transactionHash);
+            return true;
+        } else {
+            throw new Error('Transaction failed');
+        }
     } catch (error) {
-        console.error('Error approving work:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('Error approving work:', error);
         throw error;
     }
 };

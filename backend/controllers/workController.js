@@ -1,5 +1,6 @@
 const WorkSubmission = require('../models/WorkSubmission');
 const Contract = require('../models/Contract');
+const contractUtils = require('../utils/contractUtils');
 
 exports.submitWork = async (req, res) => {
     try {
@@ -13,6 +14,14 @@ exports.submitWork = async (req, res) => {
             });
         }
 
+        // Verify contract is in correct state (both_signed)
+        if (contract.status !== 'both_signed') {
+            return res.status(400).json({
+                success: false,
+                error: 'Contract must be signed by both parties before work submission'
+            });
+        }
+
         // Verify user is the freelancer
         if (req.user.id !== contract.freelancer.toString()) {
             return res.status(403).json({
@@ -21,11 +30,13 @@ exports.submitWork = async (req, res) => {
             });
         }
 
+        // Create work submission
         const newSubmission = new WorkSubmission({
             contract: contractId,
             freelancer: req.user.id,
             workDescription,
-            fileHash
+            fileHash,
+            status: 'submitted'
         });
 
         await newSubmission.save();
@@ -35,13 +46,14 @@ exports.submitWork = async (req, res) => {
         await contract.save();
 
         // Call blockchain to submit work
-        await submitWorkToContract(contract.contractAddress, fileHash);
+        await contractUtils.submitWork(contract.contractId, fileHash, req.signer);
 
         res.status(201).json({
             success: true,
             data: newSubmission
         });
     } catch (err) {
+        console.error('Error submitting work:', err);
         res.status(500).json({
             success: false,
             error: err.message
@@ -63,6 +75,14 @@ exports.approveWork = async (req, res) => {
             });
         }
 
+        // Verify contract is in correct state (work_submitted)
+        if (submission.contract.status !== 'work_submitted') {
+            return res.status(400).json({
+                success: false,
+                error: 'Work must be submitted before approval'
+            });
+        }
+
         // Verify user is the client
         if (req.user.id !== submission.contract.client.toString()) {
             return res.status(403).json({
@@ -81,14 +101,15 @@ exports.approveWork = async (req, res) => {
         contract.status = 'completed';
         await contract.save();
 
-        // Call blockchain to approve work
-        await approveWorkOnContract(contract.contractAddress);
+        // Call blockchain to approve work and release payment
+        await contractUtils.approveWork(contract.contractId, req.signer);
 
         res.status(200).json({
             success: true,
             data: submission
         });
     } catch (err) {
+        console.error('Error approving work:', err);
         res.status(500).json({
             success: false,
             error: err.message

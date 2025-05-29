@@ -35,7 +35,11 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         }
     };
 
-    if (isClient && contract.clientSigned) {
+    // Check if contract.blockchainState and its properties exist before accessing them
+    const clientSignedBlockchain = contract.blockchainState?.clientApproved;
+    const freelancerSignedBlockchain = contract.blockchainState?.freelancerApproved;
+
+    if (isClient && clientSignedBlockchain) {
         return (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-green-700 flex items-center">
@@ -48,7 +52,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isFreelancer && contract.freelancerSigned) {
+    if (isFreelancer && freelancerSignedBlockchain) {
         return (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-green-700 flex items-center">
@@ -61,7 +65,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isClient && !contract.clientSigned) {
+    if (isClient && !clientSignedBlockchain) {
         return (
             <div className="mt-6">
                 {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>}
@@ -82,7 +86,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isFreelancer && !contract.freelancerSigned && contract.clientSigned) {
+    if (isFreelancer && !freelancerSignedBlockchain && clientSignedBlockchain) {
         return (
             <div className="mt-6">
                 {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>}
