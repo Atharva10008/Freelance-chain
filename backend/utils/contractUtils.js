@@ -70,234 +70,12 @@ const createContract = async (contractData, signer) => {
             transactionHash: tx.hash
         };
     } catch (error) {
-        console.error('Create contract error:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
-        
-        // Enhanced error handling
-        let errorMessage = 'Contract creation failed';
-        if (error.code === 'UNSUPPORTED_OPERATION') {
-            errorMessage = 'Network operation not supported';
-        } else if (error.code === 'INVALID_ARGUMENT') {
-            errorMessage = 'Invalid address provided';
-        } else if (error.code === 'INSUFFICIENT_FUNDS') {
-            errorMessage = 'Insufficient funds for transaction';
-        }
-        throw new Error(`${errorMessage}: ${error.message}`);
-    }
-};
-
-const getContractState = async (contractAddress, contractId, signer, txHash = null) => {
-    try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
-
-        let contractInstance;
-        if (contractAddress) {
-            contractInstance = new ethers.Contract(contractAddress, CONTRACT_ABI, signer || provider);
-        } else {
-            contractInstance = contract;
-        }
-
-        // Convert contractId if needed
-        let id;
-        if (typeof contractId === 'string' && contractId.length === 24) {
-            const Contract = require('../models/Contract');
-            const contractDoc = await Contract.findById(contractId);
-            if (!contractDoc) throw new Error('Contract not found in database');
-            id = contractDoc.contractId;
-        } else {
-            try {
-                id = parseInt(contractId, 10);
-                if (isNaN(id) || id < 0) { throw new Error('Invalid contract ID format or value'); }
-            } catch(e) { throw new Error('Invalid contract ID provided'); }
-        }
-
-        console.log('[getContractState] Fetching contract with blockchain ID:', id);
-
-        // If we have a transaction hash, wait for it to be mined and get the block number
-        let minBlockNumber = 0;
-        if (txHash) {
-            console.log('[getContractState] Waiting for transaction to be fully confirmed:', txHash);
-            try {
-                const receipt = await provider.waitForTransaction(txHash, 2);
-                minBlockNumber = receipt.blockNumber;
-                console.log('[getContractState] Transaction confirmed at block:', minBlockNumber);
-            } catch (waitError) {
-                console.warn(`[getContractState] Error waiting for transaction confirmations for ${txHash}:`, waitError.message);
-            }
-        }
-
-        const MAX_RETRIES = 8;
-        const BASE_DELAY_MS = 2000;
-        let state = null;
-        let lastError = null;
-
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-            try {
-                const currentBlock = await provider.getBlockNumber();
-                console.log(`[getContractState] Attempt ${attempt + 1}: Current block: ${currentBlock}, Min block: ${minBlockNumber}`);
-
-                if (txHash && minBlockNumber > 0 && currentBlock < minBlockNumber) {
-                    console.log('[getContractState] Current block is behind transaction block, waiting...');
-                    await new Promise(resolve => setTimeout(resolve, BASE_DELAY_MS));
-                    continue;
-                }
-
-                state = await contractInstance.getContract(id, { blockTag: 'latest' });
-                
-                console.log('[getContractState] Raw contract state from blockchain:', {
-                    contractId: id,
-                    clientApproved: state.clientApproved,
-                    clientSigned: state.clientApproved,
-                    status: state.status,
-                    fundsDeposited: state.fundsDeposited
-                });
-
-                console.log(`[getContractState] Successfully fetched state on attempt ${attempt + 1}`);
-                break;
-
-            } catch (err) {
-                lastError = err;
-                console.error(`[getContractState] Error on attempt ${attempt + 1} for id ${id}:`, err.message);
-
-                if (attempt < MAX_RETRIES - 1) {
-                    const delay = BASE_DELAY_MS * Math.pow(1.5, attempt);
-                    console.log(`[getContractState] Waiting for ${delay}ms before next retry.`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    throw new Error(`Failed to fetch contract state after ${MAX_RETRIES} attempts: ${lastError?.message}`);
-                }
-            }
-        }
-
-        if (!state) {
-            console.error('[getContractState] Failed to fetch state after all retries completed without breaking.');
-            throw new Error(`Failed to fetch contract state for ID ${id} after multiple retries.`);
-        }
-
-        // Ensure statusMap includes all possible statuses from the smart contract enum
-        // enum Status { Created, ClientSigned, FreelancerSigned, BothSigned, WorkSubmitted, Completed, Disputed, Funded }
-        const statusMap = ['Created', 'ClientSigned', 'FreelancerSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Funded'];
-        const readableStatus = statusMap[state.status] || 'Unknown';
-        const bidAmountEth = ethers.utils.formatEther(state.bidAmount);
-        const deadlineDate = new Date(state.deadline.toNumber() * 1000);
-
-        console.log('[getContractState] Raw chain values before override:', {
-            rawClientApproved: state.clientApproved,
-            rawFreelancerApproved: state.freelancerApproved,
-            status: state.status
-        });
-
-        // Determine approval states based on contract status value
-        // Status 1 = ClientSigned, Status 3 = BothSigned
-        const isClientApproved = state.status === 1 || state.status === 3;
-        // Status 2 = FreelancerSigned, Status 3 = BothSigned
-        const isFreelancerApproved = state.status === 2 || state.status === 3;
-
-        const blockchainState = {
-            client: state.client,
-            freelancer: state.freelancer,
-            bidAmount: bidAmountEth,
-            deadline: deadlineDate,
-            jobTitle: state.jobTitle,
-            jobDescription: state.jobDescription,
-            status: readableStatus,
-            workSubmissionHash: state.workSubmissionHash,
-            fundsDeposited: Boolean(state.fundsDeposited),
-            clientApproved: isClientApproved, // Use derived boolean based on status
-            freelancerApproved: isFreelancerApproved, // Use derived boolean based on status
-        };
-
-        console.log('[getContractState] Processed blockchain state:', {
-            contractId: id,
-            clientApproved: blockchainState.clientApproved,
-            status: blockchainState.status,
-            fundsDeposited: blockchainState.fundsDeposited
-        });
-        
-        return blockchainState;
-
-    } catch (error) {
-        console.error('[getContractState] Fatal error:', error);
+        console.error('Create contract error:', error);
         throw error;
     }
 };
 
-const clientSignContract = async (contractId, signer) => {
-    try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer is required');
-
-        const contractWithSigner = contract.connect(signer);
-        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
-        if (isNaN(id)) throw new Error('Invalid contractId');
-
-        console.log('[clientSignContract] Starting signing process for contract:', id);
-
-        // Send the transaction
-        const tx = await contractWithSigner.clientSignContract(id);
-        console.log('[clientSignContract] Transaction sent:', tx.hash);
-
-        // Wait for transaction confirmation (this happens before fetching state)
-        const receipt = await tx.wait();
-        console.log('[clientSignContract] Transaction confirmed in block:', receipt.blockNumber);
-
-        // Fetch the updated state using the robust function and passing the transaction hash
-        const updatedState = await getContractState(null, id, signer, tx.hash); // Pass tx.hash here
-
-        // You can add a final check here based on updatedState if needed
-        if (!updatedState.clientApproved) {
-             console.warn('[clientSignContract] Final state check after getContractStateRobust - clientApproved is still false.');
-             // Depending on desired strictness, you could throw here or handle client-side
-        } else {
-             console.log('[clientSignContract] Final state check successful - clientApproved is true.');
-        }
-
-
-        return {
-            success: true,
-            transactionHash: tx.hash,
-            blockNumber: receipt.blockNumber,
-            blockchainState: updatedState // Optionally return the fetched state
-        };
-
-    } catch (error) {
-        console.error('[clientSignContract] Error:', error);
-        throw error;
-    }
-};
-
-const freelancerSignContract = async (contractId, signer) => {
-    try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer is required');
-        
-        const contractWithSigner = contract.connect(signer);
-        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
-        if (isNaN(id)) throw new Error('Invalid contractId');
-        
-        const tx = await contractWithSigner.freelancerSignContract(id);
-        await tx.wait();
-        return true;
-    } catch (error) {
-        console.error('Error signing contract as freelancer:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
-        throw error;
-    }
-};
-
-const depositFunds = async (contractId, signer) => {
+const clientSignAndDeposit = async (contractId, signer) => {
     try {
         if (!contract) throw new Error('Contract not initialized');
         if (!signer) throw new Error('Signer required');
@@ -305,20 +83,36 @@ const depositFunds = async (contractId, signer) => {
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
-        console.log('Depositing funds for contract ID:', id);
+        console.log('Client signing and depositing funds for contract ID:', id);
 
-        const tx = await contract.connect(signer).depositFunds(id);
+        const tx = await contract.connect(signer).clientSignAndDeposit(id, {
+            value: ethers.utils.parseEther(contractData.bidAmount.toString())
+        });
         const receipt = await tx.wait();
-        console.log('Funds deposited successfully:', receipt.transactionHash);
+        console.log('Client signed and deposited funds successfully:', receipt.transactionHash);
         return true;
     } catch (error) {
-        console.error('Error depositing funds:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('Error in client sign and deposit:', error);
+        throw error;
+    }
+};
+
+const freelancerSign = async (contractId, signer) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        console.log('Freelancer signing contract ID:', id);
+
+        const tx = await contract.connect(signer).freelancerSign(id);
+        const receipt = await tx.wait();
+        console.log('Freelancer signed successfully:', receipt.transactionHash);
+        return true;
+    } catch (error) {
+        console.error('Error in freelancer sign:', error);
         throw error;
     }
 };
@@ -375,6 +169,32 @@ const approveWork = async (contractId, signer) => {
     }
 };
 
+const rejectWork = async (contractId, reason, signer) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        console.log('Rejecting work for contract ID:', id);
+        const tx = await contract.connect(signer).rejectWork(id, reason);
+        
+        console.log('Waiting for transaction confirmation...');
+        const receipt = await tx.wait();
+        
+        if (receipt.status === 1) {
+            console.log('Work rejected successfully:', receipt.transactionHash);
+            return true;
+        } else {
+            throw new Error('Transaction failed');
+        }
+    } catch (error) {
+        console.error('Error rejecting work:', error);
+        throw error;
+    }
+};
+
 const raiseDispute = async (contractId, signer) => {
     try {
         if (!contract) throw new Error('Contract not initialized');
@@ -383,17 +203,83 @@ const raiseDispute = async (contractId, signer) => {
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
-        const tx = await contract.connect(signer).raiseDispute(id);
+        // Get dispute fee
+        const disputeFee = await contract.disputeFee();
+        console.log('Dispute fee:', ethers.utils.formatEther(disputeFee), 'ETH');
+
+        const tx = await contract.connect(signer).raiseDispute(id, {
+            value: disputeFee
+        });
         await tx.wait();
         return true;
     } catch (error) {
-        console.error('Error raising dispute:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('Error raising dispute:', error);
+        throw error;
+    }
+};
+
+const resolveDispute = async (contractId, clientShare, freelancerShare, signer) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const tx = await contract.connect(signer).resolveDispute(id, clientShare, freelancerShare);
+        await tx.wait();
+        return true;
+    } catch (error) {
+        console.error('Error resolving dispute:', error);
+        throw error;
+    }
+};
+
+const requestRefund = async (contractId, signer) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+        if (!signer) throw new Error('Signer required');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const tx = await contract.connect(signer).requestRefund(id);
+        await tx.wait();
+        return true;
+    } catch (error) {
+        console.error('Error requesting refund:', error);
+        throw error;
+    }
+};
+
+const getContractState = async (contractId, signer = null) => {
+    try {
+        if (!contract) throw new Error('Contract not initialized');
+
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) throw new Error('Invalid contractId');
+
+        const state = await contract.getContract(id);
+        
+        const statusMap = ['Created', 'ClientSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Refunded'];
+        const readableStatus = statusMap[state.status] || 'Unknown';
+        
+        return {
+            client: state.client,
+            freelancer: state.freelancer,
+            bidAmount: ethers.utils.formatEther(state.bidAmount),
+            deadline: new Date(state.deadline.toNumber() * 1000),
+            jobTitle: state.jobTitle,
+            jobDescription: state.jobDescription,
+            status: readableStatus,
+            workSubmissionHash: state.workSubmissionHash,
+            fundsDeposited: state.fundsDeposited,
+            clientSigned: state.clientSigned,
+            freelancerSigned: state.freelancerSigned,
+            createdAt: new Date(state.createdAt.toNumber() * 1000)
+        };
+    } catch (error) {
+        console.error('Error getting contract state:', error);
         throw error;
     }
 };
@@ -401,11 +287,13 @@ const raiseDispute = async (contractId, signer) => {
 module.exports = {
     initialize,
     createContract,
-    getContractState,
-    clientSignContract,
-    freelancerSignContract,
-    depositFunds,
+    clientSignAndDeposit,
+    freelancerSign,
     submitWork,
     approveWork,
-    raiseDispute
+    rejectWork,
+    raiseDispute,
+    resolveDispute,
+    requestRefund,
+    getContractState
 };
