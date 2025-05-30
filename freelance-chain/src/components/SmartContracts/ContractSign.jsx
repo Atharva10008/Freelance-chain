@@ -9,10 +9,21 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
     const isClient = account?.toLowerCase() === contract.client?.toLowerCase();
     const isFreelancer = account?.toLowerCase() === contract.freelancer?.toLowerCase();
     
+    // Add safety checks for funds being deposited
+    const clientSignedBlockchain = contract.blockchainState?.clientApproved;
+    const freelancerSignedBlockchain = contract.blockchainState?.freelancerApproved;
+    const fundsDeposited = contract.blockchainState?.fundsDeposited;
+
     const handleClientSign = async () => {
         try {
             setIsSigning(true);
             setError('');
+
+            // Verify funds are deposited before allowing client to sign
+            if (!fundsDeposited) {
+                throw new Error('Funds must be deposited before signing the contract');
+            }
+
             await onClientSign(contract.contractId);
         } catch (err) {
             console.error('Client sign error:', err);
@@ -26,6 +37,12 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         try {
             setIsSigning(true);
             setError('');
+
+            // Verify client has signed and funds are deposited before allowing freelancer to sign
+            if (!clientSignedBlockchain || !fundsDeposited) {
+                throw new Error('Client must sign and deposit funds before freelancer can sign');
+            }
+
             await onFreelancerSign(contract.contractId);
         } catch (err) {
             console.error('Freelancer sign error:', err);
@@ -35,7 +52,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         }
     };
 
-    if (isClient && contract.clientSigned) {
+    if (isClient && clientSignedBlockchain) {
         return (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-green-700 flex items-center">
@@ -48,7 +65,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isFreelancer && contract.freelancerSigned) {
+    if (isFreelancer && freelancerSignedBlockchain) {
         return (
             <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-green-700 flex items-center">
@@ -61,7 +78,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isClient && !contract.clientSigned) {
+    if (isClient && !clientSignedBlockchain) {
         return (
             <div className="mt-6">
                 {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>}
@@ -69,12 +86,21 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
                     <h4 className="font-medium text-blue-800 mb-2">Client Signature Required</h4>
                     <p className="text-blue-600 text-sm">
                         As the client, please sign this contract to proceed.
+                        {!fundsDeposited && (
+                            <span className="block mt-2 text-red-600">
+                                Note: You must deposit funds before signing.
+                            </span>
+                        )}
                     </p>
                 </div>
                 <button
                     onClick={handleClientSign}
-                    disabled={isSigning}
-                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-opacity-90 disabled:opacity-70"
+                    disabled={isSigning || !fundsDeposited}
+                    className={`px-4 py-2 rounded-md ${
+                        fundsDeposited 
+                            ? 'bg-primary text-white hover:bg-opacity-90' 
+                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    } disabled:opacity-70`}
                 >
                     {isSigning ? 'Signing...' : 'Sign as Client'}
                 </button>
@@ -82,7 +108,7 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
         );
     }
 
-    if (isFreelancer && !contract.freelancerSigned && contract.clientSigned) {
+    if (isFreelancer && !freelancerSignedBlockchain && clientSignedBlockchain) {
         return (
             <div className="mt-6">
                 {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>}
@@ -90,12 +116,21 @@ const ContractSign = ({ contract, onClientSign, onFreelancerSign }) => {
                     <h4 className="font-medium text-blue-800 mb-2">Freelancer Signature Required</h4>
                     <p className="text-blue-600 text-sm">
                         As the freelancer, please sign this contract to proceed.
+                        {!fundsDeposited && (
+                            <span className="block mt-2 text-red-600">
+                                Note: Client must deposit funds before you can sign.
+                            </span>
+                        )}
                     </p>
                 </div>
                 <button
                     onClick={handleFreelancerSign}
-                    disabled={isSigning}
-                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-opacity-90 disabled:opacity-70"
+                    disabled={isSigning || !fundsDeposited}
+                    className={`px-4 py-2 rounded-md ${
+                        fundsDeposited 
+                            ? 'bg-primary text-white hover:bg-opacity-90' 
+                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    } disabled:opacity-70`}
                 >
                     {isSigning ? 'Signing...' : 'Sign as Freelancer'}
                 </button>

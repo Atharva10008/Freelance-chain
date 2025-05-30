@@ -81,9 +81,10 @@ const ContractView = () => {
 
   const handleClientSign = async () => {
     try {
+      setLocalLoading(true);
       if (!contract) return;
-      if (!contract.contractAddress) {
-        toast.error('Contract address is missing');
+      if (!contract.contractAddress || contract.contractId === undefined) {
+        toast.error('Contract address or ID missing');
         return;
       }
       if (!window.ethereum) {
@@ -91,251 +92,126 @@ const ContractView = () => {
         return;
       }
 
-      setLocalLoading(true);
-
-      // Connect to MetaMask with explicit network configuration
+      // Connect to MetaMask
       const provider = new ethers.providers.Web3Provider(window.ethereum, {
         name: 'Vanguard',
         chainId: 78600,
         ensAddress: null
       });
       const signer = provider.getSigner();
+      const contractInstance = new ethers.Contract(
+        contract.contractAddress,
+        CONTRACT_ABI,
+        signer
+      );
 
-      // Validate contract address
-      const contractAddress = validateAddress(contract.contractAddress);
-      if (!contractAddress) {
-        toast.error('Invalid contract address');
+      // First check contract state
+      let currentContractState = await contractInstance.getContract(contract.contractId);
+      console.log('Current contract state:', currentContractState);
+
+      // Verify client is the correct signer
+      const clientAddress = await signer.getAddress();
+      const contractClientAddress = currentContractState.client;
+      console.log('Debug addresses:', {
+        currentWallet: clientAddress,
+        contractClient: contractClientAddress,
+        areEqual: clientAddress.toLowerCase() === contractClientAddress.toLowerCase()
+      });
+
+      if (clientAddress.toLowerCase() !== contractClientAddress.toLowerCase()) {
+        toast.error(`Address mismatch. Expected: ${contractClientAddress}, Got: ${clientAddress}`);
         setLocalLoading(false);
         return;
       }
 
-      console.log('Contract State:', {
-        contractAddress,
-        contractId: contract.contractId,
-        provider: provider,
-        signer: signer
-      });
+      // Calculate deposit amount
+      const depositAmount = currentContractState.bidAmount;
+      console.log('Deposit amount:', ethers.utils.formatEther(depositAmount), 'VG');
+      console.log('Raw deposit amount:', depositAmount.toString());
 
-      // Initialize contract with signer
-      let contractInstance;
+      // Check native coin balance
+      let balance;
       try {
-        contractInstance = new ethers.Contract(
-          contractAddress,
-          CONTRACT_ABI,
-          signer
-        );
-        console.log('Contract instance created successfully');
-
-        // First check current contract state from the blockchain
-        let currentContractState = await contractInstance.getContract(contract.contractId);
-        console.log('Current blockchain contract state:', currentContractState);
-
-        // Verify client is the correct signer
-        const clientAddress = validateAddress(await signer.getAddress());
-        const contractClientAddress = validateAddress(currentContractState.client);
-
-        if (!clientAddress || !contractClientAddress) {
-          toast.error('Invalid address detected');
-          setLocalLoading(false);
-          return;
-        }
-      
-        console.log('Debug addresses:', {
-          currentWallet: clientAddress,
-          contractClient: contractClientAddress,
-          areEqual: clientAddress.toLowerCase() === contractClientAddress.toLowerCase()
-        });
-
-        if (clientAddress.toLowerCase() !== contractClientAddress.toLowerCase()) {
-          toast.error(`Address mismatch. Expected: ${contractClientAddress}, Got: ${clientAddress}`);
-          setLocalLoading(false);
-          return;
-        }
-
-        if (!currentContractState.fundsDeposited) {
-          console.log('Funds not deposited, proceeding with deposit...');
-
-          // Calculate deposit amount
-          const depositAmount = currentContractState.bidAmount;
-          console.log('Deposit amount:', ethers.utils.formatEther(depositAmount), 'VG');
-
-          // Check native coin balance
-          let balance;
-          try {
-            balance = await signer.getBalance();
-            console.log('Native Balance:', ethers.utils.formatEther(balance), 'VG');
-          } catch (err) {
-            console.error('Error checking native balance:', err);
-            toast.error('Failed to check native balance. Please try again.');
-            setLocalLoading(false);
-            return;
-          }
-
-          const gasBuffer = ethers.utils.parseEther('0.01');
-          const totalRequired = depositAmount.add(gasBuffer);
-
-          if (balance.lt(totalRequired)) {
-            toast.error(`Insufficient native funds. Required: ${ethers.utils.formatEther(totalRequired)} VG (Bid + gas), Available: ${ethers.utils.formatEther(balance)} VG`);
-            setLocalLoading(false);
-            return;
-          }
-
-          // Get current gas price and add 20% buffer
-          const gasPrice = await provider.getGasPrice();
-          const bufferedGasPrice = gasPrice.mul(120).div(100);
-          console.log('Gas price with buffer:', ethers.utils.formatUnits(bufferedGasPrice, 'gwei'), 'gwei');
-
-          const depositGasLimit = 300000;
-
-          console.log('Attempting to deposit funds...');
-          const depositTx = await contractInstance.depositFunds(
-            contract.contractId,
-            { 
-              value: depositAmount,
-              gasPrice: bufferedGasPrice,
-              gasLimit: depositGasLimit
-            }
-          );
-          console.log('Deposit transaction sent:', depositTx.hash);
-          
-          console.log('Waiting for deposit confirmation...');
-          const depositReceipt = await depositTx.wait();
-          console.log('Deposit confirmed:', depositReceipt);
-
-          if (depositReceipt.status === 1) {
-            console.log('Deposit transaction was successful on chain.');
-          } else {
-            console.error('Deposit transaction failed on chain.', depositReceipt);
-            throw new Error('Deposit transaction failed.');
-          }
-
-          console.log('Re-fetching contract state after deposit...');
-          currentContractState = await contractInstance.getContract(contract.contractId);
-          console.log('Updated contract state after deposit:', currentContractState);
-
-          if (!currentContractState.fundsDeposited) {
-            throw new Error('Deposit verification failed: Funds not marked as deposited on chain after transaction.');
-          }
-          toast.success('Funds deposited successfully!');
-
-          console.log('Waiting for blockchain state to update...');
-          await new Promise(resolve => setTimeout(resolve, 5000));
-
-          console.log('Final contract state check before signing...');
-          currentContractState = await contractInstance.getContract(contract.contractId);
-          console.log('Final contract state before signing:', currentContractState);
-
-          if (!currentContractState.fundsDeposited) {
-            throw new Error('Funds not properly deposited. Please try again.');
-          }
-        } else {
-          console.log('Funds already deposited, skipping deposit step.');
-          console.log('Fetching latest contract state as funds are already deposited...');
-          currentContractState = await contractInstance.getContract(contract.contractId);
-          console.log('Latest contract state:', currentContractState);
-        }
-
-        console.log('Checking clientApproved state:', currentContractState.clientApproved);
-        if (currentContractState.clientApproved) {
-          toast.info('Contract already signed by client');
-          setLocalLoading(false);
-          return;
-        }
-
-        const signGasLimit = 200000;
-
-        console.log('Attempting to send clientSignContract transaction...');
-        const signTx = await contractInstance.clientSignContract(
-          contract.contractId,
-          { 
-            gasLimit: signGasLimit
-          }
-        );
-        console.log('Sign transaction sent:', signTx.hash);
-        
-        console.log('Waiting for clientSignContract confirmation...');
-        const signReceipt = await signTx.wait();
-        console.log('ClientSignContract confirmed:', signReceipt);
-
-        if (signReceipt.status === 1) {
-          console.log('ClientSignContract transaction was successful on chain.');
-
-          fetchContracts(); // Refresh the contract list to get the updated state
-
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Add a 2-second delay
-
-          toast.success('Contract signed by client successfully!');
-
-        } else {
-          console.error('ClientSignContract transaction failed on chain.', signReceipt);
-          throw new Error('ClientSignContract transaction failed.');
-        }
-
-        const finalContractData = await contractInstance.getContract(contract.contractId);
-        console.log('Final contract state after signing:', finalContractData);
-
-        if (!finalContractData.clientApproved) {
-          throw new Error('Signing verification failed: Client not marked as approved on chain after transaction.');
-        }
-
-        // After successful signing, force a refresh of the contract data
-        const updatedContract = await getContract(contractId);
-        
-        // Force a refetch of all contracts to ensure UI is updated
-        await fetchContracts(false);
-
+        balance = await signer.getBalance();
+        console.log('Native Balance:', ethers.utils.formatEther(balance), 'VG');
       } catch (err) {
-        console.error('Signing failed:', err);
-        
-        let errorMessage = 'Operation failed';
-        if (err.code === 'UNSUPPORTED_OPERATION') {
-          errorMessage = 'Network operation not supported.';
-        } else if (err.code === 'INVALID_ARGUMENT') {
-          errorMessage = 'Invalid address provided.';
-        } else if (err.code === 'INSUFFICIENT_FUNDS') {
-          errorMessage = 'Insufficient native funds for transaction.';
-        } else if (err.code === 'UNPREDICTABLE_GAS_LIMIT') {
-          errorMessage = `Failed to estimate gas. Error: ${err.message}`;
-        } else if (err.code === 'NONCE_EXPIRED') {
-          errorMessage = 'Transaction expired. Please try again.';
-        } else if (err.code === 'CALL_EXCEPTION') {
-          if (err.error && err.error.message) {
-            errorMessage = `Transaction failed: ${err.error.message}`;
-          } else if (err.message && err.message.includes('execution reverted')) {
-            const revertReason = err.message.split('execution reverted:')[1];
-            errorMessage = revertReason ? `Transaction failed: ${revertReason.trim()}` : 'Transaction failed: Contract execution reverted.';
-          } else {
-            errorMessage = 'Transaction failed: Call exception.';
-          }
-        } else if (err.reason) {
-          errorMessage = `Transaction failed: ${err.reason}`;
-        } else if (err.message) {
-          errorMessage = err.message;
-        }
-        toast.error(`${errorMessage}`);
-      } finally {
+        console.error('Error checking native balance:', err);
+        toast.error('Failed to check native balance. Please try again.');
         setLocalLoading(false);
+        return;
       }
+
+      const gasBuffer = ethers.utils.parseEther('0.01');
+      const totalRequired = depositAmount.add(gasBuffer);
+
+      if (balance.lt(totalRequired)) {
+        toast.error(`Insufficient native funds. Required: ${ethers.utils.formatEther(totalRequired)} VG (Bid + gas), Available: ${ethers.utils.formatEther(balance)} VG`);
+        setLocalLoading(false);
+        return;
+      }
+
+      // Get current gas price and add 20% buffer
+      const gasPrice = await provider.getGasPrice();
+      const bufferedGasPrice = gasPrice.mul(120).div(100);
+      console.log('Gas price with buffer:', ethers.utils.formatUnits(bufferedGasPrice, 'gwei'), 'gwei');
+
+      // Use clientSignAndDeposit to handle both signing and depositing in one transaction
+      if (!currentContractState.clientApproved || !currentContractState.fundsDeposited) {
+        console.log('Signing contract and depositing funds...');
+        const signAndDepositTx = await contractInstance.clientSignAndDeposit(
+          contract.contractId,
+          {
+            value: depositAmount,
+            gasPrice: bufferedGasPrice,
+            gasLimit: 500000 // Increased gas limit for combined operation
+          }
+        );
+        console.log('Sign and deposit transaction sent:', signAndDepositTx.hash);
+        toast.info('Transaction sent! Waiting for confirmation...');
+        
+        const receipt = await signAndDepositTx.wait();
+        console.log('Transaction confirmed:', receipt);
+
+        if (receipt.status !== 1) {
+          throw new Error('Transaction failed');
+        }
+
+        // Verify both signing and deposit were successful
+        currentContractState = await contractInstance.getContract(contract.contractId);
+        if (!currentContractState.clientApproved || !currentContractState.fundsDeposited) {
+          throw new Error('Verification failed: Contract not properly signed or funds not deposited');
+        }
+        toast.success('Contract signed and funds deposited successfully!');
+      } else {
+        toast.info('Contract already signed and funds deposited');
+      }
+
+      // Update local state
+      await fetchContracts(false);
+
     } catch (err) {
-      console.error('Signing failed:', err);
+      console.error('Error in contract interaction:', err);
+      let errorMessage = 'Transaction failed';
       
-      let errorMessage = 'Signing failed';
-      if (err.code === 'UNSUPPORTED_OPERATION') {
-        errorMessage = 'Network operation not supported';
-      } else if (err.code === 'INVALID_ARGUMENT') {
-        errorMessage = 'Invalid address provided';
+      if (err.code === 'CALL_EXCEPTION') {
+        if (err.error && err.error.message) {
+          errorMessage = `Contract execution failed: ${err.error.message}`;
+        } else if (err.message && err.message.includes('execution reverted')) {
+          const revertReason = err.message.split('execution reverted:')[1];
+          errorMessage = revertReason ? `Contract execution failed: ${revertReason.trim()}` : 'Contract execution failed. A contract requirement was not met.';
+        }
       } else if (err.code === 'INSUFFICIENT_FUNDS') {
-        errorMessage = 'Insufficient native funds for transaction.';
+        errorMessage = 'Insufficient funds for transaction. Please ensure you have enough VG for the deposit and gas fees.';
       } else if (err.code === 'UNPREDICTABLE_GAS_LIMIT') {
         errorMessage = 'Failed to estimate gas. Please try again or contact support.';
-      } else if (err.code === 'NONCE_EXPIRED') {
-        errorMessage = 'Transaction expired. Please try again.';
-      } else if (err.code === 'CALL_EXCEPTION') {
-        errorMessage = 'Transaction failed. Please check contract requirements.';
-      } else if (err.message && err.message.includes('execution reverted')) {
-        errorMessage = `Transaction failed: ${err.message.split('execution reverted:')[1] || err.message}`;
+      } else if (err.message) {
+        errorMessage = err.message;
       }
-      toast.error(`${errorMessage}: ${err.message || 'Unknown error'}`);
+      
+      toast.error(errorMessage);
+      throw err;
+    } finally {
+      setLocalLoading(false);
     }
   };
 
@@ -366,37 +242,56 @@ const ContractView = () => {
 
       // First check contract state
       const contractData = await contractInstance.getContract(contract.contractId);
-      console.log('Current contract state:', contractData);
+      console.log('Current contract state before signing:', {
+        status: contractData.status,
+        clientSigned: contractData.clientSigned,
+        freelancerSigned: contractData.freelancerSigned,
+        fundsDeposited: contractData.fundsDeposited,
+        client: contractData.client,
+        freelancer: contractData.freelancer
+      });
 
       // Verify freelancer is the correct signer
       const freelancerAddress = await signer.getAddress();
+      console.log('Freelancer address check:', {
+        signerAddress: freelancerAddress,
+        contractFreelancer: contractData.freelancer,
+        isMatch: freelancerAddress.toLowerCase() === contractData.freelancer.toLowerCase()
+      });
+
       if (freelancerAddress.toLowerCase() !== contractData.freelancer.toLowerCase()) {
         toast.error('Only the contract freelancer can sign');
         return;
       }
 
       // Check if client has already signed and deposited funds
-      if (!contractData.clientApproved || !contractData.fundsDeposited) {
+      if (contractData.status !== 1) {
+        console.error('Contract status check failed:', {
+          currentStatus: contractData.status,
+          expectedStatus: 1,
+          clientSigned: contractData.clientSigned,
+          fundsDeposited: contractData.fundsDeposited
+        });
         toast.error('Client must sign and deposit funds first');
-        return;
-      }
-
-      // Check if freelancer has already signed
-      if (contractData.freelancerApproved) {
-        toast.error('Contract already signed by freelancer');
         return;
       }
 
       // Get current gas price and add 20% buffer
       const gasPrice = await provider.getGasPrice();
-      const bufferedGasPrice = gasPrice.mul(120).div(100); // Add 20% buffer
+      const bufferedGasPrice = gasPrice.mul(120).div(100);
       console.log('Gas price with buffer:', ethers.utils.formatUnits(bufferedGasPrice, 'gwei'), 'gwei');
 
       // Use a fixed gas limit for signing
-      const signGasLimit = 200000; // This should be enough for a sign transaction
+      const signGasLimit = 200000;
 
-      // Sign contract
-      const tx = await contractInstance.freelancerSignContract(
+      console.log('Attempting to sign contract with parameters:', {
+        contractId: contract.contractId,
+        gasPrice: ethers.utils.formatUnits(bufferedGasPrice, 'gwei'),
+        gasLimit: signGasLimit
+      });
+
+      // Sign contract using freelancerSign function
+      const tx = await contractInstance.freelancerSign(
         contract.contractId,
         { 
           gasPrice: bufferedGasPrice,
@@ -409,36 +304,42 @@ const ContractView = () => {
       const receipt = await tx.wait();
       console.log('Transaction confirmed:', receipt);
 
+      if (receipt.status === 0) {
+        throw new Error('Transaction failed - contract requirements not met');
+      }
+
       // Verify signing was successful
       const updatedContractData = await contractInstance.getContract(contract.contractId);
-      if (!updatedContractData.freelancerApproved) {
+      console.log('Contract state after signing:', {
+        status: updatedContractData.status,
+        clientSigned: updatedContractData.clientSigned,
+        freelancerSigned: updatedContractData.freelancerSigned,
+        fundsDeposited: updatedContractData.fundsDeposited
+      });
+
+      if (!updatedContractData.freelancerSigned) {
         throw new Error('Signing verification failed');
       }
 
       toast.success('Contract signed successfully!');
       
       // Refetch all contracts to ensure UI is updated with the latest state
-      // The context will handle updating the contracts array
       await fetchContracts(false); // Fetch silently without toast
     } catch (err) {
       console.error('Signing failed:', err);
+      let errorMessage = 'Failed to sign contract';
       
       // Handle specific error cases
       if (err.code === 'UNPREDICTABLE_GAS_LIMIT') {
-        toast.error('Failed to estimate gas. Please try again or contact support.');
+        errorMessage = 'Failed to estimate gas. Please try again or contact support.';
       } else if (err.code === 'NONCE_EXPIRED') {
-        toast.error('Transaction expired. Please try again.');
+        errorMessage = 'Transaction expired. Please try again.';
       } else if (err.code === 'CALL_EXCEPTION') {
-        toast.error('Transaction failed. Please check contract requirements.');
+        errorMessage = 'Transaction failed. Please check contract requirements.';
       } else if (err.message && err.message.includes('execution reverted')) {
-         errorMessage = `Transaction failed: ${err.message.split('execution reverted:')[1] || err.message}`;
+        errorMessage = `Transaction failed: ${err.message.split('execution reverted:')[1] || err.message}`;
       }
       
-      // If a more specific error message wasn't set, use a generic one
-      if (!errorMessage) {
-        errorMessage = 'Signing failed: Unknown error';
-      }
-
       toast.error(errorMessage);
     }
   };
