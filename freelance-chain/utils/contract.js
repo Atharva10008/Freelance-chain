@@ -282,7 +282,7 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "freelancerSignContract",
+    "name": "freelancerSign",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -293,11 +293,6 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "_contractId",
         "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "_workHash",
-        "type": "string"
       }
     ],
     "name": "submitWork",
@@ -499,6 +494,19 @@ export const CONTRACT_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "clientSignAndDeposit",
+    "outputs": [],
+    "stateMutability": "payable",
     "type": "function"
   }
 ];
