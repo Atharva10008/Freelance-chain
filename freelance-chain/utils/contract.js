@@ -1,4 +1,4 @@
-export const CONTRACT_ADDRESS = "0x602c884fA87A05Ac843CF888e0fC3db545bD86c3";
+export const CONTRACT_ADDRESS = "0x82622Ff7504fc2f239219c4aDe2c09f3411192Ce";
 
 export const CONTRACT_ABI = [
   {
@@ -67,7 +67,7 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "FreelancerSigned",
+    "name": "BothSigned",
     "type": "event"
   },
   {
