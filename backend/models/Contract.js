@@ -50,14 +50,10 @@ const contractSchema = new mongoose.Schema({
         enum: [
             'created',
             'client_signed',
-            'freelancer_signed',
-            'active',
-            'funded',
+            'both_signed',
             'work_submitted',
-            'work_approved',
             'completed',
             'disputed',
-            'both_signed'
         ],
         default: 'created'
     },

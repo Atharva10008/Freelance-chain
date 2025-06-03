@@ -16,11 +16,10 @@ const contractUtils = require('../utils/contractUtils');
 const blockchainToDbStatus = {
     Created: 'created',
     ClientSigned: 'client_signed',
-    FreelancerSigned: 'freelancer_signed',
+    BothSigned: 'both_signed',
     WorkSubmitted: 'work_submitted',
     Completed: 'completed',
     Disputed: 'disputed',
-    BothSigned: 'both_signed'
 };
 
 exports.createContract = async (req, res) => {
@@ -193,7 +192,7 @@ exports.getUserContracts = async (req, res) => {
                         clientApproved: contract.clientApproved,
                         freelancerApproved: contract.freelancerApproved,
                         clientSigned: contract.clientSigned,
-                        freelancerSigned: contract.freelancerSigned,
+                        BothSigned: contract.freelancerSigned,
                         blockchainState: blockchainState // Include blockchainState as extra info
                     };
                 } catch (err) {
