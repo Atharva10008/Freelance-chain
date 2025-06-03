@@ -151,11 +151,10 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
 
                 state = await contractInstance.getContract(id, { blockTag: 'latest' });
                 
-                console.log('[getContractState] Raw contract state from blockchain:', {
-                    contractId: id,
-                    clientApproved: state.clientApproved,
-                    clientSigned: state.clientApproved,
-                    status: state.status,
+                console.log('[getContractState] Raw state from blockchain for ID', id, ':', {
+                    status: state.status.toString(), // Log as string to see the raw value
+                    clientSigned: state.clientSigned,
+                    freelancerSigned: state.bothSigned,
                     fundsDeposited: state.fundsDeposited
                 });
 
@@ -183,7 +182,7 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
 
         // Ensure statusMap includes all possible statuses from the smart contract enum
         // enum Status { Created, ClientSigned, FreelancerSigned, BothSigned, WorkSubmitted, Completed, Disputed, Funded }
-        const statusMap = ['Created', 'ClientSigned', 'FreelancerSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Funded'];
+        const statusMap = ['Created', 'ClientSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Funded'];
         const readableStatus = statusMap[state.status] || 'Unknown';
         const bidAmountEth = ethers.utils.formatEther(state.bidAmount);
         const deadlineDate = new Date(state.deadline.toNumber() * 1000);
@@ -195,10 +194,9 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
         });
 
         // Determine approval states based on contract status value
-        // Status 1 = ClientSigned, Status 3 = BothSigned
-        const isClientApproved = state.status === 1 || state.status === 3;
-        // Status 2 = FreelancerSigned, Status 3 = BothSigned
-        const isFreelancerApproved = state.status === 2 || state.status === 3;
+        // A party is 'approved' (signed) if the status is at or past their signing step.
+        const isClientApproved = state.status >= 1; // Created (0), ClientSigned (1), BothSigned (2), etc.
+        const isFreelancerApproved = state.status >= 2; // Created (0), ClientSigned (1), FreelancerSigned (2), etc.
 
         const blockchainState = {
             client: state.client,
@@ -282,20 +280,37 @@ const freelancerSignContract = async (contractId, signer) => {
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
         
-        const tx = await contractWithSigner.freelancerSignContract(id);
-        await tx.wait();
-        return true;
+        console.log('[freelancerSignContract] Starting signing process for contract:', id);
+
+        // Send the transaction
+        const tx = await contractWithSigner.freelancerSign(id);
+        console.log('[freelancerSignContract] Transaction sent:', tx.hash);
+
+        // Wait for transaction confirmation
+        const receipt = await tx.wait();
+        console.log('[freelancerSignContract] Transaction confirmed in block:', receipt.blockNumber);
+
+        // Fetch the updated state using the robust function and passing the transaction hash
+        const updatedState = await getContractState(null, id, signer, tx.hash);
+
+        // Verify the state update
+        if (!updatedState.freelancerApproved) {
+            console.warn('[freelancerSignContract] Final state check after getContractState - freelancerApproved is still false.');
+        } else {
+            console.log('[freelancerSignContract] Final state check successful - freelancerApproved is true.');
+        }
+
+        return {
+            success: true,
+            transactionHash: tx.hash,
+            blockNumber: receipt.blockNumber,
+            blockchainState: updatedState
+        };
     } catch (error) {
-        console.error('Error signing contract as freelancer:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('[freelancerSignContract] Error:', error);
         throw error;
     }
-};
+};    
 
 const depositFunds = async (contractId, signer) => {
     try {
