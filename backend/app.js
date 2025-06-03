@@ -9,10 +9,8 @@ const setupSocket = require('./config/socket');
 const bidRoutes = require('./routes/bidRoutes');
 const contractRoutes = require('./routes/contractRoutes');
 const workRoutes = require('./routes/workRoutes');
+const ipfsRoutes = require('./routes/ipfsRoutes');
 const fs = require('fs');
-
-// Import the router containing the IPFS upload endpoint
-const indexRouter = require('./routes/index');
 
 const app = express();
 const server = http.createServer(app);
@@ -98,12 +96,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Mount the router containing the IPFS upload endpoint
-// The endpoint is defined as '/api/upload-to-ipfs' in routes/index.js
-// Mounting the router at '/' makes the full path '/api/upload-to-ipfs'
-app.use('/', indexRouter);
-
-// Mount other existing routes
+// Routes
 app.use('/auth', require('./routes/auth'));
 app.use('/jobs', require('./routes/jobs'));
 app.use('/projects', require('./routes/projects'));
@@ -115,9 +108,9 @@ app.use('/bids', bidRoutes);
 app.use('/contracts', contractRoutes);
 app.use('/work', workRoutes);
 app.use('/saved-jobs', require('./routes/savedJobs'));
+app.use('/api', ipfsRoutes);
 
 // API route not found handler
-// This handler should be after all your specific API routes
 app.use('/api/*', (req, res) => {
     res.status(404).json({
         success: false,

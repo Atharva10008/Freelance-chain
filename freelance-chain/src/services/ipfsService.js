@@ -1,22 +1,19 @@
 import axios from 'axios';
 
-// Assuming your backend has an endpoint like /api/upload-to-ipfs that handles IPFS uploads
+const API_URL = import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:5000';
+
 // This function sends a file to the backend and expects the IPFS hash in the response
 export const uploadToIPFS = async (file) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Replace with your actual backend IPFS upload endpoint
-    const uploadEndpoint = 'http://localhost:5000/api/upload-to-ipfs'; // Example endpoint
-
-    const response = await axios.post(uploadEndpoint, formData, {
+    const response = await axios.post(`${API_URL}/api/upload-to-ipfs`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
 
-    // Assuming your backend returns the IPFS hash in response.data.hash
     if (response.data && response.data.hash) {
       return response.data.hash;
     } else {
@@ -24,7 +21,6 @@ export const uploadToIPFS = async (file) => {
     }
   } catch (error) {
     console.error('Error uploading file to IPFS via backend:', error);
-    // More detailed error handling based on backend response structure
     if (error.response && error.response.data && error.response.data.error) {
       throw new Error(`IPFS upload failed: ${error.response.data.error}`);
     } else {

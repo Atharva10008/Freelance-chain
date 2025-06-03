@@ -66,7 +66,7 @@ exports.createContract = async (req, res) => {
                 jobDescription: req.body.jobDescription,
                 deadline: req.body.deadline,
                 transactionHash: req.body.transactionHash,
-                status: 'Created'
+                status: 'created'
             });
 
             await contract.save();

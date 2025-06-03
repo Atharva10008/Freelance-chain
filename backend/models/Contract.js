@@ -48,15 +48,18 @@ const contractSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: [
-            'Created',
-            'ClientSigned',
-            'BothSigned',
-            'WorkSubmitted',
-            'Completed',
-            'Disputed',
-            'Refunded'
+            'created',
+            'client_signed',
+            'freelancer_signed',
+            'active',
+            'funded',
+            'work_submitted',
+            'work_approved',
+            'completed',
+            'disputed',
+            'both_signed'
         ],
-        default: 'Created'
+        default: 'created'
     },
     clientSigned: {
         type: Boolean,
@@ -66,16 +69,12 @@ const contractSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    workSubmissionHash: {
-        type: String
-    },
-    fundsDeposited: {
-        type: Boolean,
-        default: false
-    },
     transactionHash: {
         type: String,
         required: true
+    },
+    workHash: {
+        type: String
     },
     createdAt: {
         type: Date,
