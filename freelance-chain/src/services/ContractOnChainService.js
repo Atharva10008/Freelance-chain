@@ -4,6 +4,9 @@ import { ethers } from 'ethers';
 // import * as contractUtils from './contractUtils';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from '../../utils/contract';
 
+// Removed import of useWeb3 as it's a hook and cannot be used here
+// import { useWeb3 } from '../context/Web3Context';
+
 // Removed initialize as it was related to backend contractUtils
 // const initialize = async () => {
 //     // Removed backend initialization logic
@@ -417,6 +420,99 @@ export const getContractStateOnChain = async (contractAddress, contractId, signe
             errorMessage = 'Failed to read contract state. Please check contract address and ID.';
         } else if (error.message && error.message.includes('execution reverted')) {
             errorMessage = `Contract read failed: ${error.message.split('execution reverted:')[1] || error.message}`;
+        }
+        
+        throw new Error(errorMessage);
+    }
+};
+
+// Add submitWorkOnChain function
+export const submitWorkOnChain = async (contractId, workHash, signer, provider) => {
+    try {
+        console.log('[submitWorkOnChain] Attempting to submit work for contract:', contractId, 'with hash:', workHash);
+
+        if (!signer) {
+            throw new Error('Signer is required to submit work on chain');
+        }
+
+        // Log signer address
+        const signerAddress = await signer.getAddress();
+        console.log('[submitWorkOnChain] Signer address:', signerAddress);
+
+        // Use the provided signer (from frontend wallet) to interact with the contract
+        const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+        // Ensure contractId is a number
+        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
+        if (isNaN(id)) {
+            throw new Error('Invalid contractId format');
+        }
+
+        // Fetch and log current contract state from blockchain before submitting work
+        console.log('[submitWorkOnChain] Fetching current contract state from blockchain...');
+        // Use the frontend provider passed as an argument
+        const contractInstanceForRead = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+        const currentState = await contractInstanceForRead.getContract(id);
+        console.log('[submitWorkOnChain] Current blockchain state:', {
+            status: currentState.status.toString(), // Log raw status enum value
+            freelancer: currentState.freelancer,
+            client: currentState.client
+        });
+
+        // Optional: Add a check here to ensure status is BothSigned (2) and signer is freelancer
+        if (currentState.status.toString() !== '2') {
+             console.error('[submitWorkOnChain] Blockchain status is not BothSigned:', currentState.status.toString());
+             // Optionally throw an error here before attempting the transaction
+             // throw new Error(`Invalid blockchain status for work submission. Expected BothSigned (2), got ${currentState.status.toString()}`);
+        }
+        if (signerAddress.toLowerCase() !== currentState.freelancer.toLowerCase()) {
+             console.error('[submitWorkOnChain] Signer address does not match blockchain freelancer address:', {
+                 signerAddress,
+                 blockchainFreelancer: currentState.freelancer
+             });
+             // Optionally throw an error here
+             // throw new Error(`Signer address mismatch. Expected ${currentState.freelancer}, got ${signerAddress}`);
+        }
+
+        console.log('[submitWorkOnChain] Calling smart contract submitWork with ID:', id, 'and work hash:', workHash);
+        
+        // Call the smart contract's submitWork function, providing transaction overrides
+        const tx = await contractInstance.submitWork(id, workHash, {
+            gasLimit: 800000 // Increased gas limit to address potential gas issues
+        });
+        console.log('[submitWorkOnChain] Transaction sent, hash:', tx.hash);
+
+        // Wait for transaction confirmation
+        console.log('[submitWorkOnChain] Waiting for transaction confirmation...');
+        const receipt = await tx.wait();
+        console.log('[submitWorkOnChain] Transaction confirmed:', receipt);
+
+        if (receipt.status === 1) {
+            console.log('[submitWorkOnChain] Work submitted successfully on chain');
+            return { success: true, transactionHash: tx.hash, blockNumber: receipt.blockNumber };
+        } else {
+            throw new Error('On-chain transaction failed');
+        }
+
+    } catch (error) {
+        console.error('[submitWorkOnChain] Error submitting work on chain:', error);
+        let errorMessage = 'Failed to submit work on chain.';
+        
+        // Enhanced error handling for common on-chain issues
+        if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+             errorMessage = 'Transaction would fail on chain. Please check contract state and ensure you are the freelancer.';
+             if (error.reason) { errorMessage += ` Reason: ${error.reason}`; }
+        } else if (error.code === 'INSUFFICIENT_FUNDS') {
+             errorMessage = 'Insufficient native coin balance for transaction gas.';
+        } else if (error.code === 'CALL_EXCEPTION') {
+             errorMessage = 'Contract execution failed. Check inputs and contract state.';
+             if (error.error && error.error.message) { errorMessage += ` Error: ${error.error.message}`; }
+             else if (error.message && error.message.includes('execution reverted')) { 
+                 const revertReason = error.message.split('execution reverted:')[1];
+                 errorMessage += revertReason ? ` Revert Reason: ${revertReason.trim()}` : ' No specific revert reason.';
+             }
+        } else if (error.message) {
+            errorMessage = error.message;
         }
         
         throw new Error(errorMessage);

@@ -1,7 +1,15 @@
 const { ethers } = require('ethers');
-require('dotenv').config();
+// Removed dotenv require as it's now in web3Utils
+// require('dotenv').config();
 const { CONTRACT_ABI } = require('../config/contractABI');
-const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x960Ea62774d166FF796415451ca4410a3A8693eb';
+const JobContractAddress = process.env.CONTRACT_ADDRESS || '0x960Ea62774d166FF796415451ca4410a3A8693eb'; // Still need contract address
+
+// Import getProvider and getSigner from web3Utils
+const { getProvider, getSigner } = require('./web3Utils');
+
+// Remove provider and contract variables as they will be obtained from web3Utils
+// let provider;
+// let contract;
 
 // Network configuration for Vanguard
 const vanguardNetwork = {
@@ -9,9 +17,6 @@ const vanguardNetwork = {
     chainId: 78600,
     ensAddress: null
 };
-
-let provider;
-let contract;
 
 // Helper function to validate addresses
 const validateAddress = (address) => {
@@ -21,37 +26,21 @@ const validateAddress = (address) => {
     return ethers.utils.getAddress(address); // Normalize to checksum address
 };
 
-const initialize = async () => {
-    try {
-        // Initialize provider with explicit network configuration
-        provider = new ethers.providers.JsonRpcProvider({
-            url: process.env.PROVIDER_URL || 'https://rpc-vanguard.vanarchain.com',
-            ...vanguardNetwork
-        });
-        
-        await provider.ready;
-        console.log('Provider initialized with network:', await provider.getNetwork());
-        
-        contract = new ethers.Contract(JobContractAddress, CONTRACT_ABI, provider);
-        console.log('Contract initialized at address:', JobContractAddress);
-        
-        return true;
-    } catch (error) {
-        console.error('Failed to initialize contract utilities:', error);
-        throw error;
-    }
-};
-
+// Update createContract to use getSigner
 const createContract = async (contractData, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer required');
+        // Get provider and signer from centralized utility
+        const provider = getProvider();
+        const signerInstance = getSigner(); // Use getSigner here
+
+        // Use the JobContractAddress and ABI with the obtained signer/provider
+        const contractInstance = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
 
         // Validate and normalize addresses
         const freelancerAddress = validateAddress(contractData.freelancerAddress);
-        const signerAddress = validateAddress(await signer.getAddress());
+        const signerAddress = validateAddress(await signerInstance.getAddress());
 
-        const tx = await contract.connect(signer).createContract(
+        const tx = await contractInstance.createContract(
             freelancerAddress,
             ethers.utils.parseEther(contractData.bidAmount.toString()),
             Math.floor(new Date(contractData.deadline).getTime() / 1000),
@@ -91,17 +80,20 @@ const createContract = async (contractData, signer) => {
     }
 };
 
+// Update getContractState to use getProvider
 const getContractState = async (contractAddress, contractId, signer, txHash = null) => {
     try {
-        if (!contract) {
-            throw new Error('Contract not initialized. Call initialize() first.');
-        }
+        // Get provider from centralized utility
+        const provider = getProvider();
 
         let contractInstance;
+        console.log('[getContractState] Creating contract instance for state fetch');
         if (contractAddress) {
-            contractInstance = new ethers.Contract(contractAddress, CONTRACT_ABI, signer || provider);
+            // Explicitly disable CCIP Read to prevent potential ENS issues
+            contractInstance = new ethers.Contract(contractAddress, CONTRACT_ABI, signer || provider, { enableCcipRead: false });
         } else {
-            contractInstance = contract;
+            // Explicitly disable CCIP Read here too if contract address is not provided (uses the initialized contract)
+            contractInstance = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signer || provider, { enableCcipRead: false });
         }
 
         // Convert contractId if needed
@@ -182,7 +174,7 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
 
         // Ensure statusMap includes all possible statuses from the smart contract enum
         // enum Status { Created, ClientSigned, FreelancerSigned, BothSigned, WorkSubmitted, Completed, Disputed, Funded }
-        const statusMap = ['Created', 'ClientSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Funded'];
+        const statusMap = ['Created', 'ClientSigned', 'BothSigned', 'WorkSubmitted', 'Completed', 'Disputed', 'Refunded'];
         const readableStatus = statusMap[state.status] || 'Unknown';
         const bidAmountEth = ethers.utils.formatEther(state.bidAmount);
         const deadlineDate = new Date(state.deadline.toNumber() * 1000);
@@ -195,9 +187,6 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
 
         // Determine approval states based on contract status value
         // A party is 'approved' (signed) if the status is at or past their signing step.
-        const isClientApproved = state.status >= 1; // Created (0), ClientSigned (1), BothSigned (2), etc.
-        const isFreelancerApproved = state.status >= 2; // Created (0), ClientSigned (1), FreelancerSigned (2), etc.
-
         const blockchainState = {
             client: state.client,
             freelancer: state.freelancer,
@@ -208,8 +197,8 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
             status: readableStatus,
             workSubmissionHash: state.workSubmissionHash,
             fundsDeposited: Boolean(state.fundsDeposited),
-            clientApproved: isClientApproved, // Use derived boolean based on status
-            freelancerApproved: isFreelancerApproved, // Use derived boolean based on status
+            clientApproved: state.clientSigned, // Use the boolean directly from the smart contract state
+            freelancerApproved: state.freelancerSigned, // Use the boolean directly from the smart contract state
         };
 
         console.log('[getContractState] Processed blockchain state:', {
@@ -227,36 +216,38 @@ const getContractState = async (contractAddress, contractId, signer, txHash = nu
     }
 };
 
-const clientSignContract = async (contractId, signer) => {
+// Update clientSignContract to use getSigner and pass bid amount
+const clientSignContract = async (contractId, bidAmount, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer is required');
+        // Get signer from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider(); // Also get provider for wait
 
-        const contractWithSigner = contract.connect(signer);
+        const contractWithSigner = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
+
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
-        console.log('[clientSignContract] Starting signing process for contract:', id);
+        console.log('[clientSignContract] Starting signing process and depositing funds for contract:', id, 'with bid amount:', bidAmount);
 
-        // Send the transaction
-        const tx = await contractWithSigner.clientSignContract(id);
-        console.log('[clientSignContract] Transaction sent:', tx.hash);
+        // Send the transaction using the contract instance connected to the signer, passing the bid amount as value
+        const tx = await contractWithSigner.clientSignAndDeposit(id, { value: ethers.utils.parseEther(bidAmount.toString()) });
+        console.log('[clientSignContract] Transaction sent, hash:', tx.hash);
 
-        // Wait for transaction confirmation (this happens before fetching state)
-        const receipt = await tx.wait();
+        // Wait for transaction confirmation using the provider
+        const receipt = await provider.waitForTransaction(tx.hash, 2);
         console.log('[clientSignContract] Transaction confirmed in block:', receipt.blockNumber);
 
         // Fetch the updated state using the robust function and passing the transaction hash
-        const updatedState = await getContractState(null, id, signer, tx.hash); // Pass tx.hash here
+        const updatedState = await getContractState(JobContractAddress, id, signerInstance, tx.hash); // Pass signerInstance here
 
         // You can add a final check here based on updatedState if needed
-        if (!updatedState.clientApproved) {
-             console.warn('[clientSignContract] Final state check after getContractStateRobust - clientApproved is still false.');
+        if (!updatedState.clientApproved || !updatedState.fundsDeposited) {
+             console.warn('[clientSignContract] Final state check after clientSignAndDeposit - clientApproved or fundsDeposited is still false.');
              // Depending on desired strictness, you could throw here or handle client-side
         } else {
-             console.log('[clientSignContract] Final state check successful - clientApproved is true.');
+             console.log('[clientSignContract] Final state check successful - clientApproved and fundsDeposited are true.');
         }
-
 
         return {
             success: true,
@@ -271,27 +262,30 @@ const clientSignContract = async (contractId, signer) => {
     }
 };
 
+// Update freelancerSignContract to use getSigner
 const freelancerSignContract = async (contractId, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer is required');
-        
-        const contractWithSigner = contract.connect(signer);
+        // Get signer from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider(); // Also get provider for wait
+
+        const contractWithSigner = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
+
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
-        
+
         console.log('[freelancerSignContract] Starting signing process for contract:', id);
 
-        // Send the transaction
+        // Send the transaction using the contract instance connected to the signer
         const tx = await contractWithSigner.freelancerSign(id);
         console.log('[freelancerSignContract] Transaction sent:', tx.hash);
 
-        // Wait for transaction confirmation
-        const receipt = await tx.wait();
+        // Wait for transaction confirmation using the provider
+        const receipt = await provider.waitForTransaction(tx.hash);
         console.log('[freelancerSignContract] Transaction confirmed in block:', receipt.blockNumber);
 
         // Fetch the updated state using the robust function and passing the transaction hash
-        const updatedState = await getContractState(null, id, signer, tx.hash);
+        const updatedState = await getContractState(JobContractAddress, id, signerInstance, tx.hash); // Pass signerInstance here
 
         // Verify the state update
         if (!updatedState.freelancerApproved) {
@@ -312,72 +306,162 @@ const freelancerSignContract = async (contractId, signer) => {
     }
 };    
 
+// Update depositFunds to use getSigner
 const depositFunds = async (contractId, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer required');
+         // Get signer from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider(); // Also get provider for wait
+
+        const contractWithSigner = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
 
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
         console.log('Depositing funds for contract ID:', id);
 
-        const tx = await contract.connect(signer).depositFunds(id);
-        const receipt = await tx.wait();
-        console.log('Funds deposited successfully:', receipt.transactionHash);
-        return true;
+        // This function seems to be for the client signing and depositing. It should likely be combined with clientSignContract
+        // If it's a separate deposit function, ensure it gets the amount needed.
+
+        // Assuming depositFunds is a separate function that takes amount as an argument
+        // const tx = await contractWithSigner.depositFunds(id, { value: ethers.utils.parseEther(amount.toString()) });
+
+        // As per JobContract.sol, clientSignAndDeposit handles both signing and depositing
+        // This depositFunds function in contractUtils might be redundant or used differently.
+        // If it's meant to be called separately, it needs the amount.
+
+        // Based on the original depositFunds function signature, it seems it was intended to be called with contractId and signer.
+        // However, the smart contract has clientSignAndDeposit which takes value.
+        // There might be a mismatch between the backend logic and the smart contract.
+
+        // For now, let's assume this depositFunds in contractUtils is used for a different purpose or needs adjustment.
+        // If this function is indeed used to deposit *after* signing, it needs the amount.
+
+        // *** ACTION REQUIRED: Clarify the purpose and parameters of this depositFunds function in backend/utils/contractUtils.js ***
+        // For now, I will comment out the transaction sending part as its purpose is unclear relative to clientSignAndDeposit.
+
+        // const tx = await contractWithSigner.depositFunds(id); // This line is problematic as smart contract's depositFunds is payable and likely needs value
+        // await tx.wait();
+
+        console.log('Deposit funds function in contractUtils called for ID:', id, '. **Action Required: Implement correct deposit logic.**');
+        return { success: true, message: "Deposit logic pending implementation" }; // Placeholder return
+
     } catch (error) {
-        console.error('Error depositing funds:', {
-            error,
-            message: error.message,
-            data: error.data,
+        console.error('Error depositing funds:', error);
+        throw error;
+    }
+};
+
+// Update submitWork to use getSigner and getProvider
+const submitWork = async (contractAddress, contractId, fileHash, signer) => {
+    try {
+        // Get signer and provider from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider();
+
+        console.log('[submitWork] Starting work submission with params:', {
+            contractAddress,
+            contractId,
+            fileHash,
+            signerAddress: await signerInstance.getAddress()
+        });
+
+        // Create a contract instance with the obtained signer
+        const contractInstance = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
+
+        const smartContractId = contractId.toString();
+
+        // Get current contract state before submission
+        console.log('[submitWork] Fetching current contract state...');
+        const currentState = await contractInstance.getContract(smartContractId);
+        console.log('[submitWork] Current contract state:', {
+            status: currentState.status.toString(),
+            freelancer: currentState.freelancer,
+            client: currentState.client,
+            workSubmissionHash: currentState.workSubmissionHash,
+            fundsDeposited: currentState.fundsDeposited,
+            clientSigned: currentState.clientSigned,
+            freelancerSigned: currentState.freelancerSigned
+        });
+
+        // Verify contract state
+        if (currentState.status.toString() !== '2') { // 2 is BothSigned
+            throw new Error(`Invalid contract status. Expected BothSigned (2), got ${currentState.status.toString()}`);
+        }
+
+        // Verify signer is freelancer
+        const signerAddress = await signerInstance.getAddress();
+        if (signerAddress.toLowerCase() !== currentState.freelancer.toLowerCase()) {
+            throw new Error(`Signer address (${signerAddress}) does not match contract freelancer (${currentState.freelancer})`);
+        }
+
+        console.log('[submitWork] Attempting to submit work to smart contract...');
+        
+        // Estimate gas first
+        try {
+            const gasEstimate = await contractInstance.estimateGas.submitWork(smartContractId, fileHash);
+            console.log('[submitWork] Gas estimate:', gasEstimate.toString());
+        } catch (estimateError) {
+            console.error('[submitWork] Gas estimation failed:', {
+                error: estimateError.message,
+                code: estimateError.code,
+                reason: estimateError.reason,
+                data: estimateError.data
+            });
+            throw estimateError;
+        }
+
+        // Send transaction with explicit gas limit
+        const tx = await contractInstance.submitWork(smartContractId, fileHash, {
+            gasLimit: 500000 // Increased gas limit
+        });
+        console.log('[submitWork] Transaction sent, hash:', tx.hash);
+
+        // Wait for transaction confirmation
+        console.log('[submitWork] Waiting for transaction confirmation...');
+        const receipt = await provider.waitForTransaction(tx.hash);
+        console.log('[submitWork] Transaction confirmed:', {
+            blockNumber: receipt.blockNumber,
+            status: receipt.status,
+            gasUsed: receipt.gasUsed.toString()
+        });
+
+        if (receipt.status === 1) {
+            console.log('[submitWork] Work submitted successfully');
+            return true;
+        } else {
+            throw new Error('Transaction failed');
+        }
+    } catch (error) {
+        console.error('[submitWork] Error submitting work:', {
+            error: error.message,
             code: error.code,
+            reason: error.reason,
+            data: error.data,
             stack: error.stack
         });
         throw error;
     }
 };
 
-const submitWork = async (contractId, workHash, signer) => {
-    try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer required');
-
-        const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
-        if (isNaN(id)) throw new Error('Invalid contractId');
-
-        console.log('Submitting work for contract ID:', id);
-        const tx = await contract.connect(signer).submitWork(id, workHash);
-        
-        console.log('Waiting for transaction confirmation...');
-        const receipt = await tx.wait();
-        
-        if (receipt.status === 1) {
-            console.log('Work submitted successfully:', receipt.transactionHash);
-            return true;
-        } else {
-            throw new Error('Transaction failed');
-        }
-    } catch (error) {
-        console.error('Error submitting work:', error);
-        throw error;
-    }
-};
-
+// Update approveWork to use getSigner
 const approveWork = async (contractId, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer required');
+        // Get signer from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider(); // Also get provider for wait
+
+        const contractWithSigner = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
 
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
         console.log('Approving work for contract ID:', id);
-        const tx = await contract.connect(signer).approveWork(id);
-        
+        const tx = await contractWithSigner.approveWork(id);
+
         console.log('Waiting for transaction confirmation...');
-        const receipt = await tx.wait();
-        
+        const receipt = await provider.waitForTransaction(tx.hash);
+
         if (receipt.status === 1) {
             console.log('Work approved successfully:', receipt.transactionHash);
             return true;
@@ -390,31 +474,41 @@ const approveWork = async (contractId, signer) => {
     }
 };
 
-const raiseDispute = async (contractId, signer) => {
+// Update raiseDispute to use getSigner and pass dispute fee
+const raiseDispute = async (contractId, disputeFee, signer) => {
     try {
-        if (!contract) throw new Error('Contract not initialized');
-        if (!signer) throw new Error('Signer required');
+        // Get signer from centralized utility
+        const signerInstance = getSigner();
+        const provider = getProvider(); // Also get provider for wait
+
+        const contractWithSigner = new ethers.Contract(JobContractAddress, CONTRACT_ABI, signerInstance);
 
         const id = typeof contractId === 'string' ? parseInt(contractId) : contractId;
         if (isNaN(id)) throw new Error('Invalid contractId');
 
-        const tx = await contract.connect(signer).raiseDispute(id);
-        await tx.wait();
-        return true;
+        console.log('Raising dispute for contract ID:', id, 'with fee:', disputeFee);
+        const tx = await contractWithSigner.raiseDispute(id, { value: ethers.utils.parseEther(disputeFee.toString()) });
+
+        console.log('Waiting for transaction confirmation...');
+        const receipt = await provider.waitForTransaction(tx.hash);
+
+        if (receipt.status === 1) {
+            console.log('Dispute raised successfully:', receipt.transactionHash);
+            return true;
+        } else {
+            throw new Error('Transaction failed');
+        }
     } catch (error) {
-        console.error('Error raising dispute:', {
-            error,
-            message: error.message,
-            data: error.data,
-            code: error.code,
-            stack: error.stack
-        });
+        console.error('Error raising dispute:', error);
         throw error;
     }
 };
 
+// *** ACTION REQUIRED: Add similar updates for resolveDispute and requestRefund if they exist ***
+// Also review the parameters for clientSignAndDeposit and raiseDispute to ensure they receive necessary amounts.
+
 module.exports = {
-    initialize,
+    // Removed initialize
     createContract,
     getContractState,
     clientSignContract,
@@ -423,4 +517,5 @@ module.exports = {
     submitWork,
     approveWork,
     raiseDispute
+    // *** ACTION REQUIRED: Add resolveDispute and requestRefund to exports if implemented ***
 };

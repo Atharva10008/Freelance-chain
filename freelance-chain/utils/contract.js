@@ -10,32 +10,19 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "ContractCompleted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "address",
         "name": "client",
         "type": "address"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "address",
         "name": "freelancer",
         "type": "address"
@@ -48,46 +35,7 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "ClientSigned",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "BothSigned",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "ContractFullySigned",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -99,14 +47,27 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "FundsDeposited",
+    "name": "ClientSigned",
     "type": "event"
   },
   {
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "FreelancerSigned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -125,7 +86,7 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -138,7 +99,26 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      },
+      {
         "indexed": false,
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "WorkRejected",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -146,14 +126,14 @@ export const CONTRACT_ABI = [
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "amount",
+        "name": "freelancerAmount",
         "type": "uint256"
       },
       {
         "indexed": false,
-        "internalType": "address",
-        "name": "recipient",
-        "type": "address"
+        "internalType": "uint256",
+        "name": "platformFee",
+        "type": "uint256"
       }
     ],
     "name": "PaymentReleased",
@@ -163,7 +143,7 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -173,12 +153,6 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "recipient",
-        "type": "address"
       }
     ],
     "name": "RefundIssued",
@@ -188,7 +162,7 @@ export const CONTRACT_ABI = [
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256",
         "name": "contractId",
         "type": "uint256"
@@ -198,15 +172,46 @@ export const CONTRACT_ABI = [
         "internalType": "address",
         "name": "raisedBy",
         "type": "address"
+      }
+    ],
+    "name": "DisputeRaised",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "fee",
+        "name": "clientShare",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "freelancerShare",
         "type": "uint256"
       }
     ],
-    "name": "DisputeRaised",
+    "name": "DisputeResolved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "contractId",
+        "type": "uint256"
+      }
+    ],
+    "name": "ContractCompleted",
     "type": "event"
   },
   {
@@ -256,22 +261,9 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "depositFunds",
+    "name": "clientSignAndDeposit",
     "outputs": [],
     "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "clientSignContract",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -293,6 +285,11 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "_contractId",
         "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_workHash",
+        "type": "string"
       }
     ],
     "name": "submitWork",
@@ -319,11 +316,29 @@ export const CONTRACT_ABI = [
         "internalType": "uint256",
         "name": "_contractId",
         "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "_reason",
+        "type": "string"
+      }
+    ],
+    "name": "rejectWork",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_contractId",
+        "type": "uint256"
       }
     ],
     "name": "raiseDispute",
     "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "payable",
     "type": "function"
   },
   {
@@ -358,19 +373,6 @@ export const CONTRACT_ABI = [
       }
     ],
     "name": "requestRefund",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_newFee",
-        "type": "uint256"
-      }
-    ],
-    "name": "setDisputeFee",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -432,13 +434,18 @@ export const CONTRACT_ABI = [
       },
       {
         "internalType": "bool",
-        "name": "clientApproved",
+        "name": "clientSigned",
         "type": "bool"
       },
       {
         "internalType": "bool",
-        "name": "freelancerApproved",
+        "name": "freelancerSigned",
         "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "createdAt",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -465,12 +472,12 @@ export const CONTRACT_ABI = [
         "type": "uint256"
       }
     ],
-    "name": "isContractFullySigned",
+    "name": "getEscrowBalance",
     "outputs": [
       {
-        "internalType": "bool",
+        "internalType": "uint256",
         "name": "",
-        "type": "bool"
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -484,8 +491,60 @@ export const CONTRACT_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_newFee",
+        "type": "uint256"
+      }
+    ],
+    "name": "setDisputeFee",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_newPercent",
+        "type": "uint256"
+      }
+    ],
+    "name": "setPlatformFeePercent",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
-    "name": "tokenAddress",
+    "name": "disputeFee",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "platformFeePercent",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
     "outputs": [
       {
         "internalType": "address",
@@ -497,16 +556,7 @@ export const CONTRACT_ABI = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_contractId",
-        "type": "uint256"
-      }
-    ],
-    "name": "clientSignAndDeposit",
-    "outputs": [],
     "stateMutability": "payable",
-    "type": "function"
+    "type": "receive"
   }
 ];

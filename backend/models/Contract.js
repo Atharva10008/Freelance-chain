@@ -54,6 +54,7 @@ const contractSchema = new mongoose.Schema({
             'work_submitted',
             'completed',
             'disputed',
+            'refunded'
         ],
         default: 'created'
     },
@@ -89,6 +90,8 @@ contractSchema.index({ client: 1, status: 1 });
 contractSchema.index({ freelancer: 1, status: 1 });
 contractSchema.index({ job: 1 });
 contractSchema.index({ contractAddress: 1 });
-contractSchema.index({ contractId: 1 });
+contractSchema.index({ contractId: 1 }, { unique: true });
 
-module.exports = mongoose.model('Contract', contractSchema);
+const Contract = mongoose.model('Contract', contractSchema);
+
+module.exports = Contract;

@@ -231,7 +231,6 @@ export const bidService = {
         freelancerAddress: formData.get('freelancerAddress'),
         files: formData.getAll('bidMedia').map(f => f.name)
       });
-      
       // Log the current token
       const token = localStorage.getItem('authToken');
       console.log('Current auth token:', token);

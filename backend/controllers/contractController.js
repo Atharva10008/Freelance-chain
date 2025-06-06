@@ -2,15 +2,8 @@
 const Contract = require('../models/Contract');
 const contractUtils = require('../utils/contractUtils');
 
-// Initialize contract utils when the application starts
-(async () => {
-    try {
-        await contractUtils.initialize();
-        console.log('Contract utilities initialized successfully');
-    } catch (err) {
-        console.error('Failed to initialize contract utilities:', err);
-    }
-})();
+// Removed redundant initialization
+// initialize().catch(console.error);
 
 // Add this mapping at the top of the file
 const blockchainToDbStatus = {
@@ -20,6 +13,7 @@ const blockchainToDbStatus = {
     WorkSubmitted: 'work_submitted',
     Completed: 'completed',
     Disputed: 'disputed',
+    Refunded: 'refunded'
 };
 
 exports.createContract = async (req, res) => {
@@ -248,44 +242,33 @@ exports.getContract = async (req, res) => {
             const dbStatus = blockchainToDbStatus[blockchainState.status];
             if (dbStatus && dbStatus !== contract.status) {
                 contract.status = dbStatus;
+                await contract.save();
             }
 
-            // Update both signed flags and approved flags
-            contract.clientSigned = blockchainState.clientApproved;
-            contract.freelancerSigned = blockchainState.freelancerApproved;
+            // Update signed flags based on blockchain state
+            contract.clientSigned = blockchainState.clientSigned;
+            contract.freelancerSigned = blockchainState.freelancerSigned;
             contract.updatedAt = new Date();
             await contract.save();
 
-            // Combine database and blockchain data
-            const contractData = {
-                ...contract.toObject(),
-                blockchainState: blockchainState,
-                clientApproved: blockchainState.clientApproved,
-                freelancerApproved: blockchainState.freelancerApproved,
-                clientSigned: blockchainState.clientApproved, // Ensure these are in sync
-                freelancerSigned: blockchainState.freelancerApproved // Ensure these are in sync
-            };
-
-            console.log('Data being sent from backend /contracts/:id (deep log):', JSON.stringify(contractData, null, 2));
-
             res.status(200).json({
                 success: true,
-                data: contractData
+                data: contract
             });
-        } catch (err) {
-            console.error('Error fetching blockchain state:', err);
-            // Return database data if blockchain fetch fails
+        } catch (blockchainError) {
+            console.error('Error fetching blockchain state:', blockchainError);
+            // Return database state if blockchain fetch fails
             res.status(200).json({
                 success: true,
                 data: contract,
-                warning: 'Blockchain state not available'
+                warning: 'Could not fetch blockchain state'
             });
         }
     } catch (err) {
-        console.error('Error getting contract:', err);
+        console.error('Error in getContract:', err);
         res.status(500).json({
             success: false,
-            error: err.message
+            error: err.message || 'Failed to fetch contract'
         });
     }
 };

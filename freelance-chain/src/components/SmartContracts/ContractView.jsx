@@ -172,15 +172,38 @@ const ContractView = () => {
         const receipt = await signAndDepositTx.wait();
         console.log('Transaction confirmed:', receipt);
 
-        if (receipt.status !== 1) {
-          throw new Error('Transaction failed');
+        // Implement retry logic for state verification
+        console.log('Transaction confirmed. Verifying blockchain state with retries...');
+        const MAX_VERIFY_RETRIES = 10; // Maximum number of retry attempts
+        const RETRY_DELAY_MS = 2000; // Delay between retries in milliseconds
+        let verificationSuccess = false;
+
+        for (let i = 0; i < MAX_VERIFY_RETRIES; i++) {
+            try {
+                currentContractState = await contractInstance.getContract(contract.contractId);
+                console.log(`Attempt ${i + 1}: Fetched state - Client Approved: ${currentContractState.clientApproved}, Funds Deposited: ${currentContractState.fundsDeposited}`);
+                
+                if (currentContractState.clientApproved && currentContractState.fundsDeposited) {
+                    verificationSuccess = true;
+                    console.log('State verification successful.');
+                    break; // Exit loop if verification passes
+                }
+            } catch (verifyError) {
+                console.warn(`Attempt ${i + 1}: Error fetching state - ${verifyError.message}`);
+                // Continue retrying on fetch errors
+            }
+
+            if (i < MAX_VERIFY_RETRIES - 1) {
+                console.log(`Retrying state verification in ${RETRY_DELAY_MS}ms...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            }
         }
 
-        // Verify both signing and deposit were successful
-        currentContractState = await contractInstance.getContract(contract.contractId);
-        if (!currentContractState.clientApproved || !currentContractState.fundsDeposited) {
-          throw new Error('Verification failed: Contract not properly signed or funds not deposited');
+        if (!verificationSuccess) {
+            console.error('State verification failed after multiple retries.');
+            throw new Error('Verification failed: Contract not properly signed or funds not deposited after multiple attempts.');
         }
+
         toast.success('Contract signed and funds deposited successfully!');
       } else {
         toast.info('Contract already signed and funds deposited');
@@ -379,6 +402,113 @@ const ContractView = () => {
   // Add a log to check the clientApproved status at the start of render
   console.log('ContractView rendering - clientApproved status:', isClientApproved);
 
+  // Add debug log for the condition
+  if (contract && contract.blockchainState) {
+    console.log('Work Submission Tab Condition Check:', {
+      blockchainStatus: contract.blockchainState.status,
+      isFreelancer: isFreelancer,
+      contractStatus: contract.status, // Also log backend status for comparison
+      account: account,
+      freelancerWalletAddress: contract.freelancer?.walletAddress,
+      checksumAccount: getChecksum(account),
+      checksumFreelancer: getChecksum(contract.freelancer?.walletAddress)
+    });
+  } else if (contract) {
+     console.log('Work Submission Tab Condition Check: blockchainState is undefined', { contractStatus: contract.status, account: account, freelancerWalletAddress: contract.freelancer?.walletAddress });
+  }
+
+  // Handle Work Approval by Client
+  const handleApproveWork = async () => {
+    try {
+      setLocalLoading(true);
+      if (!contract) return;
+      if (!contract.contractAddress || contract.contractId === undefined) {
+        toast.error('Contract address or ID missing');
+        return;
+      }
+      if (!window.ethereum) {
+        toast.error('MetaMask not detected');
+        return;
+      }
+
+      console.log('Attempting to approve work for contract ID:', contract.contractId);
+
+      // Connect to MetaMask and get signer
+      const provider = new ethers.providers.Web3Provider(window.ethereum, {
+        name: 'Vanguard',
+        chainId: 78600, // Make sure this matches your network config
+        ensAddress: null
+      });
+      const signer = provider.getSigner();
+      const contractInstance = new ethers.Contract(
+        contract.contractAddress,
+        CONTRACT_ABI,
+        signer
+      );
+
+      // Verify client is the correct signer
+      const clientAddress = await signer.getAddress();
+      const contractClientAddress = contract.blockchainState?.client; // Use blockchain client address
+      
+      console.log('Debug addresses (Approve Work):', {
+          currentWallet: clientAddress,
+          contractClient: contractClientAddress,
+          areEqual: clientAddress.toLowerCase() === contractClientAddress?.toLowerCase()
+      });
+      
+      if (clientAddress.toLowerCase() !== contractClientAddress?.toLowerCase()) {
+          toast.error('Only the contract client can approve work');
+          setLocalLoading(false);
+          return;
+      }
+
+      // Check contract status on chain - Should be WorkSubmitted
+      const currentContractState = await contractInstance.getContract(contract.contractId);
+       if (currentContractState.status.toString() !== '3') { // 3 is WorkSubmitted
+           toast.error(`Work is not in the submitted state. Current status: ${currentContractState.status}`);
+           setLocalLoading(false);
+           return;
+       }
+
+      console.log('Sending approveWork transaction...');
+      const tx = await contractInstance.approveWork(contract.contractId);
+      console.log('ApproveWork transaction sent, hash:', tx.hash);
+
+      toast.info('Approve Work transaction sent! Waiting for confirmation...');
+      const receipt = await tx.wait();
+      console.log('ApproveWork transaction confirmed:', receipt);
+
+      if (receipt.status === 1) {
+        toast.success('Work approved successfully!');
+        // Refetch contract to update UI
+        fetchContracts(false); // Fetch silently
+      } else {
+        throw new Error('Approve work transaction failed on chain.');
+      }
+
+    } catch (err) {
+      console.error('Error approving work:', err);
+      let errorMessage = 'Failed to approve work.';
+
+      if (err.code === 'UNPREDICTABLE_GAS_LIMIT') {
+         errorMessage = 'Failed to estimate gas. Please try again or contact support.';
+      } else if (err.code === 'CALL_EXCEPTION') {
+         errorMessage = 'Transaction failed on chain. Check contract state and requirements.';
+         if (err.error && err.error.message) { errorMessage += ` Error: ${err.error.message}`; }
+         else if (err.message && err.message.includes('execution reverted')) { 
+             const revertReason = err.message.split('execution reverted:')[1];
+             errorMessage += revertReason ? ` Revert Reason: ${revertReason.trim()}` : ' No specific revert reason.';
+         }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+
+      toast.error(errorMessage);
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
   if (loading || localLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -532,23 +662,79 @@ const ContractView = () => {
               )}
 
               {/* Work submission and approval buttons */}
-              {contract.blockchainState?.status === 'FreelancerSigned' && isFreelancer && (
+              {contract.blockchainState?.status === 'BothSigned' && isFreelancer && (
                 <WorkSubmission contract={contract} />
               )}
 
               {contract.blockchainState?.status === 'WorkSubmitted' && isClient && (
-                <div className="mt-4 space-x-4">
+                <div className="mt-4 space-y-4">
+                  <h3 className="text-lg font-medium text-gray-900">Work Submitted for Review</h3>
+                  {contract.blockchainState?.workSubmissionHash && (
+                      <div className="p-4 bg-gray-50 rounded-lg">
+                          <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
+                          {/* Construct IPFS gateway URL using the work hash */}
+                          {/* REPLACE YOUR_IPFS_GATEWAY_URL with your actual gateway */}
+                          <a 
+                              href={`https://ipfs.io/ipfs/${contract.blockchainState.workSubmissionHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline break-all text-sm"
+                          >
+                              {contract.blockchainState.workSubmissionHash}
+                          </a>
+                           <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
+                      </div>
+                  )}
+                  
+                  {/* Approval button */}
                   <button
                     onClick={handleApproveWork}
                     className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                    disabled={localLoading}
                   >
                     Approve Work
                   </button>
+                   {/* Add Reject Work button if needed */}
                 </div>
               )}
             </div>
           ) : (
-            <WorkSubmission contract={contract} />
+            /* Decide what to show in the Work Submission tab based on status and role */
+            /* If work is submitted and client is viewing, show the submitted work details */
+            contract.blockchainState?.status === 'WorkSubmitted' && isClient ? (
+                <div className="mt-4 space-y-4">
+                    <h3 className="text-lg font-medium text-gray-900">Submitted Work</h3>
+                    {contract.blockchainState?.workSubmissionHash && (
+                        <div className="p-4 bg-gray-50 rounded-lg">
+                            <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
+                             {/* Construct IPFS gateway URL using the work hash */}
+                             {/* REPLACE YOUR_IPFS_GATEWAY_URL with your actual gateway */}
+                            <a 
+                                href={`https://ipfs.io/ipfs/${contract.blockchainState.workSubmissionHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline break-all text-sm"
+                            >
+                                {contract.blockchainState.workSubmissionHash}
+                            </a>
+                             <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
+                        </div>
+                    )}
+                     {/* Client actions (Approve/Reject) could also go here */}
+                     {/* Moved approval button here as well when client is viewing the work tab */}
+                      {contract.blockchainState?.status === 'WorkSubmitted' && isClient && (
+                         <button
+                           onClick={handleApproveWork}
+                           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                           disabled={localLoading}
+                         >
+                           Approve Work
+                         </button>
+                      )}
+                </div>
+            ) : ( /* Otherwise, show the Work Submission form (for freelancer or if not submitted) */
+                 <WorkSubmission contract={contract} />
+            )
           )}
         </div>
       </div>

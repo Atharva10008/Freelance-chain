@@ -1,24 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const Contract = require('../models/Contract');
-const { 
-    initialize, 
-    createContract, 
-    clientSignAndDeposit, 
-    freelancerSign, 
-    submitWork, 
-    approveWork, 
+const {
+    createContract,
+    clientSignAndDeposit,
+    freelancerSign,
+    submitWork,
+    approveWork,
     rejectWork,
-    raiseDispute, 
+    raiseDispute,
     resolveDispute,
     requestRefund,
-    getContractState 
+    getContractState
 } = require('../utils/contractUtils');
 const { getProvider, getSigner } = require('../utils/web3Utils');
 const { validateAddress } = require('../utils/validationUtils');
-
-// Initialize contract utilities
-initialize().catch(console.error);
 
 // Create a new contract
 router.post('/create', async (req, res) => {
