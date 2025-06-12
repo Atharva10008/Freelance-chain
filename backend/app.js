@@ -108,7 +108,7 @@ app.use('/bids', bidRoutes);
 app.use('/contracts', contractRoutes);
 app.use('/work', workRoutes);
 app.use('/saved-jobs', require('./routes/savedJobs'));
-app.use('/api', ipfsRoutes);
+app.use('/api/ipfs', ipfsRoutes);
 
 // API route not found handler
 app.use('/api/*', (req, res) => {

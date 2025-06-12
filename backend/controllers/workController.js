@@ -116,3 +116,66 @@ exports.approveWork = async (req, res) => {
         });
     }
 };
+
+exports.getWorkByContractId = async (req, res) => {
+    try {
+        const { contractId } = req.params;
+        console.log('[getWorkByContractId] Fetching work for contract:', contractId);
+        
+        // Find the contract
+        const contract = await Contract.findById(contractId)
+            .populate('freelancer', 'name walletAddress')
+            .populate('client', 'name walletAddress');
+            
+        if (!contract) {
+            console.error('[getWorkByContractId] Contract not found:', contractId);
+            return res.status(404).json({
+                success: false,
+                error: 'Contract not found'
+            });
+        }
+
+        // Verify user is either the client or freelancer
+        const isClient = req.user._id.toString() === contract.client._id.toString();
+        const isFreelancer = req.user._id.toString() === contract.freelancer._id.toString();
+
+        if (!isClient && !isFreelancer) {
+            console.error('[getWorkByContractId] Unauthorized access attempt:', {
+                userId: req.user._id,
+                contractClient: contract.client._id,
+                contractFreelancer: contract.freelancer._id
+            });
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized to view this work submission'
+            });
+        }
+
+        // Check if work has been submitted
+        if (!contract.workHash) {
+            console.log('[getWorkByContractId] No work submitted for contract:', contractId);
+            return res.status(404).json({
+                success: false,
+                error: 'No work has been submitted for this contract'
+            });
+        }
+
+        // Return the work submission details
+        res.status(200).json({
+            success: true,
+            data: {
+                contract: contract._id,
+                freelancer: contract.freelancer,
+                fileHash: contract.workHash,
+                status: contract.status,
+                submittedAt: contract.updatedAt
+            }
+        });
+    } catch (err) {
+        console.error('[getWorkByContractId] Error:', err);
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+};

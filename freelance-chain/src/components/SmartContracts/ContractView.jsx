@@ -7,6 +7,9 @@ import WorkSubmission from './WorkSubmission';
 import { toast } from 'sonner';
 import { ethers } from 'ethers';
 import { CONTRACT_ABI } from '../../../utils/contract'; // Adjust path if needed
+import { Download, FileText } from 'lucide-react';
+import { downloadFromIPFS, downloadWorkSubmission } from '../../services/ipfsService';
+import Modal from '../Modal'; // Updated import path
 
 // Helper function to validate addresses
 const validateAddress = (address) => {
@@ -17,6 +20,12 @@ const validateAddress = (address) => {
   }
 };
 
+// Add this helper at the top (after imports)
+const getBackendFileUrl = (hash) => {
+  const API_URL = import.meta.env.VITE_REACT_APP_API_URL || 'http://localhost:5000';
+  return `${API_URL}/api/ipfs/download/${encodeURIComponent(hash)}`;
+};
+
 const ContractView = () => {
   const { contractId } = useParams();
   const navigate = useNavigate();
@@ -24,6 +33,14 @@ const ContractView = () => {
   const { account } = useWeb3();
   const [activeTab, setActiveTab] = useState('details');
   const [localLoading, setLocalLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectLoading, setRejectLoading] = useState(false);
+  const [disputeLoading, setDisputeLoading] = useState(false);
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
 
   // Find the specific contract being viewed from the context
   const contract = useMemo(() => {
@@ -509,6 +526,83 @@ const ContractView = () => {
     }
   };
 
+  // Reject work handler
+  const handleRejectWork = async () => {
+    if (!rejectReason.trim()) {
+      toast.error('Please provide a reason for rejection.');
+      return;
+    }
+    setRejectLoading(true);
+    try {
+      // Call smart contract rejectWork function here
+      // Example: await contractInstance.rejectWork(contract.contractId, rejectReason);
+      toast.success('Work rejected.');
+      setShowRejectModal(false);
+      setRejectReason('');
+      // Optionally refetch contract data
+      fetchContracts(false);
+    } catch (err) {
+      toast.error('Failed to reject work: ' + (err.message || 'Unknown error'));
+    } finally {
+      setRejectLoading(false);
+    }
+  };
+
+  // Dispute handler
+  const handleRaiseDispute = async () => {
+    setDisputeLoading(true);
+    try {
+      // Call smart contract raiseDispute function here
+      // Example: await contractInstance.raiseDispute(contract.contractId, { value: disputeFee });
+      toast.success('Dispute raised.');
+      setShowDisputeModal(false);
+      // Optionally refetch contract data
+      fetchContracts(false);
+    } catch (err) {
+      toast.error('Failed to raise dispute: ' + (err.message || 'Unknown error'));
+    } finally {
+      setDisputeLoading(false);
+    }
+  };
+
+  const handleDownloadWork = () => {
+    const hash = contract.blockchainState?.workSubmissionHash || contract.workHash;
+    if (!hash) {
+      toast.error('No work file available');
+      return;
+    }
+    const url = getBackendFileUrl(hash);
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Alternative method if you have the IPFS hash directly from blockchain state:
+  const handleDownloadWorkDirect = async () => {
+    try {
+      if (!contract.blockchainState?.workSubmissionHash) {
+        toast.error('No work submission hash available');
+        return;
+      }
+
+      setDownloadLoading(true);
+      console.log('Starting direct download with hash:', contract.blockchainState.workSubmissionHash);
+      
+      // Directly download using the IPFS hash from blockchain
+      await downloadFromIPFS(contract.blockchainState.workSubmissionHash);
+      toast.success('File downloaded successfully');
+    } catch (error) {
+      console.error('Error downloading work:', error);
+      toast.error('Failed to download file: ' + error.message);
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
   if (loading || localLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -666,35 +760,62 @@ const ContractView = () => {
                 <WorkSubmission contract={contract} />
               )}
 
-              {contract.blockchainState?.status === 'WorkSubmitted' && isClient && (
+              {isClient && contract.blockchainState?.workSubmissionHash && (
                 <div className="mt-4 space-y-4">
-                  <h3 className="text-lg font-medium text-gray-900">Work Submitted for Review</h3>
-                  {contract.blockchainState?.workSubmissionHash && (
-                      <div className="p-4 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
-                          {/* Construct IPFS gateway URL using the work hash */}
-                          {/* REPLACE YOUR_IPFS_GATEWAY_URL with your actual gateway */}
-                          <a 
-                              href={`https://ipfs.io/ipfs/${contract.blockchainState.workSubmissionHash}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline break-all text-sm"
-                          >
-                              {contract.blockchainState.workSubmissionHash}
-                          </a>
-                           <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
+                  <h3 className="text-lg font-medium text-gray-900">Submitted Work</h3>
+                  <div className="p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
+                        <a 
+                          href={getBackendFileUrl(contract.blockchainState.workSubmissionHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline break-all text-sm"
+                        >
+                          {contract.blockchainState.workSubmissionHash}
+                        </a>
+                        <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
                       </div>
+                      <button
+                        onClick={handleDownloadWork}
+                        disabled={downloading}
+                        className="flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-opacity-90 disabled:opacity-70"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        {downloading ? 'Downloading...' : 'Download Work'}
+                      </button>
+                    </div>
+                  </div>
+                  {/* Approve/Reject buttons for client if work is submitted and not completed/disputed */}
+                  {contract.blockchainState?.status === 'WorkSubmitted' && (
+                    <div className="flex gap-4">
+                      <button
+                        onClick={handleApproveWork}
+                        className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                        disabled={localLoading}
+                      >
+                        Approve Work
+                      </button>
+                      <button
+                        onClick={() => setShowRejectModal(true)}
+                        className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                        disabled={localLoading}
+                      >
+                        Reject Work
+                      </button>
+                    </div>
                   )}
-                  
-                  {/* Approval button */}
-                  <button
-                    onClick={handleApproveWork}
-                    className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-                    disabled={localLoading}
-                  >
-                    Approve Work
-                  </button>
-                   {/* Add Reject Work button if needed */}
+                  {/* Show Dispute option if work is rejected (add your own status/flag for rejected) */}
+                  {contract.blockchainState?.status === 'WorkRejected' && (
+                    <button
+                      onClick={() => setShowDisputeModal(true)}
+                      className="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700"
+                      disabled={disputeLoading}
+                    >
+                      Raise Dispute
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -706,30 +827,49 @@ const ContractView = () => {
                     <h3 className="text-lg font-medium text-gray-900">Submitted Work</h3>
                     {contract.blockchainState?.workSubmissionHash && (
                         <div className="p-4 bg-gray-50 rounded-lg">
-                            <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
-                             {/* Construct IPFS gateway URL using the work hash */}
-                             {/* REPLACE YOUR_IPFS_GATEWAY_URL with your actual gateway */}
-                            <a 
-                                href={`https://ipfs.io/ipfs/${contract.blockchainState.workSubmissionHash}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline break-all text-sm"
-                            >
-                                {contract.blockchainState.workSubmissionHash}
-                            </a>
-                             <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm text-gray-700 mb-2">Submitted Work Hash:</p>
+                                    <a 
+                                        href={getBackendFileUrl(contract.blockchainState.workSubmissionHash)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:underline break-all text-sm"
+                                    >
+                                        {contract.blockchainState.workSubmissionHash}
+                                    </a>
+                                    <p className="text-xs text-gray-500 mt-1">Click the hash above to view the submitted work.</p>
+                                </div>
+                                <button
+                                    onClick={handleDownloadWork}
+                                    disabled={downloading}
+                                    className="flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-opacity-90 disabled:opacity-70"
+                                >
+                                    <Download className="w-4 h-4 mr-2" />
+                                    {downloading ? 'Downloading...' : 'Download Work'}
+                                </button>
+                            </div>
                         </div>
                     )}
                      {/* Client actions (Approve/Reject) could also go here */}
                      {/* Moved approval button here as well when client is viewing the work tab */}
                       {contract.blockchainState?.status === 'WorkSubmitted' && isClient && (
-                         <button
-                           onClick={handleApproveWork}
-                           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-                           disabled={localLoading}
-                         >
-                           Approve Work
-                         </button>
+                         <div className="flex gap-4">
+                           <button
+                             onClick={handleApproveWork}
+                             className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+                             disabled={localLoading}
+                           >
+                             Approve Work
+                           </button>
+                           <button
+                             onClick={() => setShowRejectModal(true)}
+                             className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                             disabled={localLoading}
+                           >
+                             Reject Work
+                           </button>
+                         </div>
                       )}
                 </div>
             ) : ( /* Otherwise, show the Work Submission form (for freelancer or if not submitted) */
@@ -738,6 +878,64 @@ const ContractView = () => {
           )}
         </div>
       </div>
+
+      {/* Reject Modal */}
+      {showRejectModal && (
+        <Modal 
+          isOpen={showRejectModal}
+          onClose={() => setShowRejectModal(false)}
+          title="Reject Work"
+        >
+          <textarea
+            className="w-full p-2 border border-gray-300 rounded mb-4"
+            rows={4}
+            placeholder="Enter reason for rejection..."
+            value={rejectReason}
+            onChange={e => setRejectReason(e.target.value)}
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setShowRejectModal(false)}
+              className="px-4 py-2 bg-gray-200 rounded"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRejectWork}
+              className="px-4 py-2 bg-red-600 text-white rounded"
+              disabled={rejectLoading}
+            >
+              {rejectLoading ? 'Rejecting...' : 'Reject Work'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Dispute Modal */}
+      {showDisputeModal && (
+        <Modal 
+          isOpen={showDisputeModal}
+          onClose={() => setShowDisputeModal(false)}
+          title="Raise Dispute"
+        >
+          <p className="mb-4">Are you sure you want to raise a dispute? This will notify the platform admin for resolution.</p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setShowDisputeModal(false)}
+              className="px-4 py-2 bg-gray-200 rounded"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRaiseDispute}
+              className="px-4 py-2 bg-yellow-600 text-white rounded"
+              disabled={disputeLoading}
+            >
+              {disputeLoading ? 'Raising...' : 'Raise Dispute'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

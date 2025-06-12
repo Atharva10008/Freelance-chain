@@ -430,8 +430,14 @@ export const getContractStateOnChain = async (contractAddress, contractId, signe
 export const submitWorkOnChain = async (contractId, workHash, signer, provider) => {
     try {
         console.log('[submitWorkOnChain] Attempting to submit work for contract:', contractId, 'with hash:', workHash);
+        console.log('[submitWorkOnChain] Signer details:', {
+            hasSigner: !!signer,
+            signerType: signer ? typeof signer : 'undefined',
+            providerType: provider ? typeof provider : 'undefined'
+        });
 
         if (!signer) {
+            console.error('[submitWorkOnChain] No signer provided');
             throw new Error('Signer is required to submit work on chain');
         }
 
@@ -459,19 +465,22 @@ export const submitWorkOnChain = async (contractId, workHash, signer, provider) 
             client: currentState.client
         });
 
-        // Optional: Add a check here to ensure status is BothSigned (2) and signer is freelancer
-        if (currentState.status.toString() !== '2') {
-             console.error('[submitWorkOnChain] Blockchain status is not BothSigned:', currentState.status.toString());
-             // Optionally throw an error here before attempting the transaction
-             // throw new Error(`Invalid blockchain status for work submission. Expected BothSigned (2), got ${currentState.status.toString()}`);
-        }
+        // Verify the signer is the freelancer
         if (signerAddress.toLowerCase() !== currentState.freelancer.toLowerCase()) {
-             console.error('[submitWorkOnChain] Signer address does not match blockchain freelancer address:', {
-                 signerAddress,
-                 blockchainFreelancer: currentState.freelancer
-             });
-             // Optionally throw an error here
-             // throw new Error(`Signer address mismatch. Expected ${currentState.freelancer}, got ${signerAddress}`);
+            console.error('[submitWorkOnChain] Signer address does not match blockchain freelancer address:', {
+                signerAddress,
+                blockchainFreelancer: currentState.freelancer
+            });
+            throw new Error('Only the contract freelancer can submit work');
+        }
+
+        // Verify contract status is BothSigned (2)
+        if (currentState.status.toString() !== '2') {
+            console.error('[submitWorkOnChain] Invalid contract status for work submission:', {
+                currentStatus: currentState.status.toString(),
+                expectedStatus: '2'
+            });
+            throw new Error('Contract must be signed by both parties before work can be submitted');
         }
 
         console.log('[submitWorkOnChain] Calling smart contract submitWork with ID:', id, 'and work hash:', workHash);
